@@ -617,6 +617,7 @@ extern const bfd_target bfd_elf32_hppa_nbsd_vec;
 extern const bfd_target bfd_elf32_hppa_vec;
 extern const bfd_target bfd_elf32_i370_vec;
 extern const bfd_target bfd_elf32_i386_freebsd_vec;
+extern const bfd_target bfd_elf32_i386_haiku_vec;
 extern const bfd_target bfd_elf32_i386_nacl_vec;
 extern const bfd_target bfd_elf32_i386_sol2_vec;
 extern const bfd_target bfd_elf32_i386_vxworks_vec;

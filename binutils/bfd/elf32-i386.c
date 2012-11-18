@@ -4995,6 +4995,27 @@ elf_i386_fbsd_post_process_headers (bfd *abfd, struct bfd_link_info *info)
 
 #include "elf32-target.h"
 
+/* Haiku  */
+
+#undef	TARGET_LITTLE_SYM
+#define	TARGET_LITTLE_SYM		bfd_elf32_i386_haiku_vec
+#undef	TARGET_LITTLE_NAME
+#define	TARGET_LITTLE_NAME		"elf32-i386-haiku"
+#undef	ELF_OSABI
+#define	ELF_OSABI			ELFOSABI_HAIKU
+
+#undef	elf32_bed
+#define	elf32_bed				elf32_i386_haiku_bed
+
+/* Restore defaults */
+#undef	elf_backend_post_process_headers
+#define	elf_backend_post_process_headers	_bfd_elf_set_osabi
+
+#undef	elf_backend_add_symbol_hook
+#define elf_backend_add_symbol_hook			elf_i386_add_symbol_hook
+
+#include "elf32-target.h"
+
 /* Solaris 2.  */
 
 #undef	TARGET_LITTLE_SYM
