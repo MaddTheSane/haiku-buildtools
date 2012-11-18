@@ -281,9 +281,13 @@ case "${targ}" in
     ;;
   arm-*-elf | arm-*-freebsd* | arm*-*-linux-* | arm*-*-conix* | \
   arm*-*-uclinux* | arm-*-kfreebsd*-gnu | \
-  arm*-*-eabi* | arm*-*-haiku*)
+  arm*-*-eabi*)
     targ_defvec=bfd_elf32_littlearm_vec
     targ_selvecs=bfd_elf32_bigarm_vec
+    ;;
+  arm*-*-haiku*)
+    targ_defvec=bfd_elf32_littlearm_haiku_vec
+    targ_selvecs=bfd_elf32_bigarm_haiku_vec
     ;;
   arm*-*-vxworks | arm*-*-windiss)
     targ_defvec=bfd_elf32_littlearm_vxworks_vec
@@ -608,7 +612,7 @@ case "${targ}" in
     want64=true
     ;;
   x86_64-*-haiku*)
-    targ_defvec=bfd_elf64_x86_64_vec
+    targ_defvec=bfd_elf64_x86_64_haiku_vec
     targ_selvecs="bfd_elf32_i386_vec"
     want64=true
     ;;
@@ -651,7 +655,7 @@ case "${targ}" in
     targ_selvecs="i386pe_vec i386pei_vec"
     ;;
   i[3-7]86-*-haiku*)
-    targ_defvec=bfd_elf32_i386_vec
+    targ_defvec=bfd_elf32_i386_haiku_vec
     ;;
   i[3-7]86-*-interix*)
     targ_defvec=i386pei_vec
@@ -845,7 +849,7 @@ case "${targ}" in
     targ_underscore=yes
     ;;
   m68*-*-haiku*)
-    targ_defvec=bfd_elf32_m68k_vec
+    targ_defvec=bfd_elf32_m68k_haiku_vec
     targ_selvecs="m68kcoff_vec ieee_vec"
     ;;
   m88*-harris-cxux* | m88*-*-dgux* | m88*-*-sysv4*)
@@ -892,7 +896,7 @@ case "${targ}" in
     targ_selvecs="bfd_elf32_tradbigmips_vec bfd_elf64_tradbigmips_vec bfd_elf64_tradlittlemips_vec ecoff_little_vec ecoff_big_vec"
     ;;
   mips*el-*-haiku*)
-    targ_defvec=bfd_elf32_littlemips_vec
+    targ_defvec=bfd_elf32_littlemips_haiku_vec
     targ_selvecs="bfd_elf32_bigmips_vec bfd_elf64_bigmips_vec bfd_elf64_littlemips_vec ecoff_little_vec ecoff_big_vec"
     ;;
   mips*-*-netbsd*)
@@ -1173,7 +1177,7 @@ case "${targ}" in
     targ_archs="$targ_archs bfd_i386_arch"
     ;;
   powerpc-*-haiku*)
-    targ_defvec=bfd_elf32_powerpc_vec
+    targ_defvec=bfd_elf32_powerpc_haiku_vec
     targ_selvecs="rs6000coff_vec bfd_elf32_powerpcle_vec pef_vec pef_xlib_vec pmac_xcoff_vec ppcboot_vec"
     targ_cflags=-D__HAIKU_TARGET__
     ;;
