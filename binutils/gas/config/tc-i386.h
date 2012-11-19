@@ -63,6 +63,11 @@ extern unsigned long i386_mach (void);
 #define ELF_TARGET_FORMAT	"elf32-i386-vxworks"
 #endif
 
+#ifdef TE_Haiku
+#define ELF_TARGET_FORMAT	"elf32-i386-haiku"
+#define ELF_TARGET_FORMAT64	"elf64-x86-64-haiku"
+#endif
+
 #ifdef TE_SOLARIS
 #define ELF_TARGET_FORMAT	"elf32-i386-sol2"
 #define ELF_TARGET_FORMAT64	"elf64-x86-64-sol2"

@@ -1,4 +1,4 @@
-/* Target environment for BeOS/Haiku.  It is the same as the generic
+/* Target environment for BeOS.  It is the same as the generic
    target, except that it arranges via the TE_BeOS define to
    suppress the use of "/" as a comment character.  Some code in the
    haiku kernel uses "/" to mean division.  (What a concept!)  */
