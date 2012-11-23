@@ -78,7 +78,7 @@
 #define ELFOSABI_C6000_ELFABI 64 /* Bare-metal TMS320C6000 */
 #define ELFOSABI_C6000_LINUX 65 /* Linux TMS320C6000 */
 #define ELFOSABI_ARM	     97	/* ARM */
-#define ELFOSABI_HAIKU	     99	/* Haiku XXXFATELF: This constant should be allocated in the SysV gABI specification, or at least upstream by binutils. */
+#define ELFOSABI_HAIKU	     99	/* Haiku FATELF_TODO: This constant should be allocated in the SysV gABI specification, or at least upstream by binutils. */
 #define ELFOSABI_STANDALONE 255	/* Standalone (embedded) application */
 
 #define EI_ABIVERSION	8	/* ABI version */
