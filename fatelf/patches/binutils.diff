@@ -1,0 +1,565 @@
+diff -ru binutils-2.19.1-orig/bfd/bfd.c binutils-2.19.1/bfd/bfd.c
+--- binutils-2.19.1-orig/bfd/bfd.c	2008-08-16 23:12:49.000000000 -0400
++++ binutils-2.19.1/bfd/bfd.c	2009-10-02 01:01:48.000000000 -0400
+@@ -278,6 +278,10 @@
+ .
+ .  {* Set if this is a thin archive.  *}
+ .  unsigned int is_thin_archive : 1;
++.
++.  {* Base offset, in bytes, of object inside a container file, such as FatELF,
++.     or a Mach-O Universal Binary. This will be zero for most things. *}
++.  ufile_ptr base_offset;
+ .};
+ .
+ */
+diff -ru binutils-2.19.1-orig/bfd/bfd-in2.h binutils-2.19.1/bfd/bfd-in2.h
+--- binutils-2.19.1-orig/bfd/bfd-in2.h	2008-08-20 19:28:57.000000000 -0400
++++ binutils-2.19.1/bfd/bfd-in2.h	2009-10-02 01:01:48.000000000 -0400
+@@ -4823,6 +4823,10 @@
+ 
+   /* Set if this is a thin archive.  */
+   unsigned int is_thin_archive : 1;
++
++  /* Base offset, in bytes, of object inside a container file, such as FatELF,
++     or a Mach-O Universal Binary. This will be zero for most things. */
++  ufile_ptr base_offset;
+ };
+ 
+ typedef enum bfd_error
+diff -ru binutils-2.19.1-orig/bfd/bfdio.c binutils-2.19.1/bfd/bfdio.c
+--- binutils-2.19.1-orig/bfd/bfdio.c	2008-02-20 12:42:35.000000000 -0500
++++ binutils-2.19.1/bfd/bfdio.c	2009-10-02 01:01:48.000000000 -0400
+@@ -281,7 +281,7 @@
+       bim = abfd->iostream;
+ 
+       if (direction == SEEK_SET)
+-	abfd->where = position;
++	abfd->where = position + abfd->base_offset;
+       else
+ 	abfd->where += position;
+ 
+@@ -337,6 +337,9 @@
+     }
+ 
+   file_position = position;
++  if (direction == SEEK_SET)
++    file_position += abfd->base_offset;
++
+   if (direction == SEEK_SET && abfd->my_archive != NULL)
+     file_position += abfd->origin;
+ 
+@@ -366,7 +369,7 @@
+     {
+       /* Adjust `where' field.  */
+       if (direction == SEEK_SET)
+-	abfd->where = position;
++	abfd->where = position + abfd->base_offset;
+       else
+ 	abfd->where += position;
+     }
+diff -ru binutils-2.19.1-orig/bfd/elfcode.h binutils-2.19.1/bfd/elfcode.h
+--- binutils-2.19.1-orig/bfd/elfcode.h	2009-10-02 15:47:18.000000000 -0400
++++ binutils-2.19.1/bfd/elfcode.h	2009-10-02 15:16:51.000000000 -0400
+@@ -479,7 +479,6 @@
+    target vectors, most of which will not match.  We have to avoid leaving
+    any side effects in ABFD, or any data it points to (like tdata), if the
+    file does not match the target vector.  */
+-
+ const bfd_target *
+ elf_object_p (bfd *abfd)
+ {
+@@ -495,9 +494,14 @@
+   bfd_size_type amt;
+   const bfd_target *target;
+   const bfd_target * const *target_ptr;
+-
++  const FatElf_External_Hdr *x_fathdr = (FatElf_External_Hdr *) &x_ehdr;
++  bfd_vma base_offset = 0;
+   preserve.marker = NULL;
+ 
++  ebd = get_elf_backend_data (abfd);
++  if (ebd->s->arch_size != ARCH_SIZE)
++    goto got_wrong_format_error;
++
+   /* Read in the ELF header in external format.  */
+ 
+   if (bfd_bread (&x_ehdr, sizeof (x_ehdr), abfd) != sizeof (x_ehdr))
+@@ -508,6 +512,102 @@
+ 	goto got_no_match;
+     }
+ 
++  /* See if this is a FatELF file, and if so, locate the correct record. */
++  if (bfd_getl32(&x_fathdr->magic) == FATELF_MAGIC)
++    {
++      FatElf_External_Record *x_fatrec_ptr;
++      unsigned char fatindex;
++      file_ptr seekpos = -((file_ptr) sizeof (x_ehdr));
++
++      if (bfd_getl16(&x_fathdr->version) != FATELF_FORMAT_VERSION)
++	goto got_wrong_format_error;
++
++      /* reposition at the end of the FatELF header for record reading... */
++      seekpos += ((file_ptr) sizeof (*x_fathdr));
++      if (bfd_seek (abfd, seekpos, SEEK_CUR) != 0)
++	goto got_no_match;
++
++      amt = sizeof (*x_fatrec_ptr) * x_fathdr->num_records;
++      x_fatrec_ptr = (FatElf_External_Record *) bfd_alloc (abfd, amt);
++      if (!x_fatrec_ptr)
++	goto got_no_match;
++
++      if (bfd_bread (x_fatrec_ptr, amt, abfd) != amt)
++	{
++	  if (bfd_get_error () != bfd_error_system_call)
++	    goto got_wrong_format_error;
++	  else
++	    goto got_no_match;
++	}
++
++      for (fatindex = 0; fatindex < x_fathdr->num_records; fatindex++)
++	{
++	  const FatElf_External_Record *x_fatrec = &x_fatrec_ptr[fatindex];
++	  const unsigned short fatmachine = bfd_getl16(&x_fatrec->machine);
++	  bfd_uint64_t ui64_offset = 0;
++
++	  /* most of these tests are more involved in the real ELF header. */
++	  if (x_fatrec->word_size != ELFCLASS)
++	    continue;
++	  else if (x_fatrec->osabi != ebd->elf_osabi)
++	    continue;
++
++	  if (ebd->elf_machine_code != fatmachine
++	      && (ebd->elf_machine_alt1 == 0
++		  || fatmachine != ebd->elf_machine_alt1)
++	      && (ebd->elf_machine_alt2 == 0
++		  || fatmachine != ebd->elf_machine_alt2))
++	    continue;
++	
++	  switch (x_fatrec->byte_order)
++	    {
++	    case ELFDATA2MSB:		/* Big-endian */
++	      if (! bfd_header_big_endian (abfd))
++		continue;
++	      break;
++	    case ELFDATA2LSB:		/* Little-endian */
++	      if (! bfd_header_little_endian (abfd))
++		continue;
++	      break;
++	    default:			/* Unknown data encoding specified */
++	        continue;
++	    }
++
++	  ui64_offset = bfd_getl64(&x_fatrec->offset);
++	  base_offset = (bfd_vma) ui64_offset;
++	  if ((ui64_offset + bfd_getl64(&x_fatrec->size)) < ui64_offset)
++	    continue;
++
++	  if (x_fatrec->word_size == ELFCLASS32)
++	    {
++	      if ((ui64_offset + bfd_getl64(&x_fatrec->size)) > 0xFFFFFFFF)
++		continue;
++	    }
++
++	  break;  /* we can use this record! */
++	}
++
++	if (fatindex == x_fathdr->num_records)  /* no match. */
++	  goto got_wrong_format_error;
++
++	if (base_offset != (bfd_vma) ((file_ptr) base_offset))
++	  goto got_wrong_format_error;
++
++    /* Now future seeks will refer to this specific ELF binary. */
++    abfd->base_offset = (ufile_ptr) base_offset;
++	if (bfd_seek (abfd, 0, SEEK_SET) != 0)
++	  goto got_no_match;
++
++	/* pull in the actual ELF header and continue as usual. */
++	if (bfd_bread (&x_ehdr, sizeof (x_ehdr), abfd) != sizeof (x_ehdr))
++	  {
++	    if (bfd_get_error () != bfd_error_system_call)
++	      goto got_wrong_format_error;
++	    else
++	      goto got_no_match;
++	  }
++    }
++
+   /* Now check to see if we have a valid ELF file, and one that BFD can
+      make use of.  The magic number must match, the address size ('class')
+      and byte-swapping must match our XVEC entry, and it must have a
+@@ -573,10 +673,6 @@
+   if (i_ehdrp->e_shoff == 0 && i_ehdrp->e_shnum != 0)
+     goto got_wrong_format_error;
+ 
+-  ebd = get_elf_backend_data (abfd);
+-  if (ebd->s->arch_size != ARCH_SIZE)
+-    goto got_wrong_format_error;
+-
+   /* Check that the ELF e_machine field matches what this particular
+      BFD format expects.  */
+   if (ebd->elf_machine_code != i_ehdrp->e_machine
+diff -ru binutils-2.19.1-orig/binutils/readelf.c binutils-2.19.1/binutils/readelf.c
+--- binutils-2.19.1-orig/binutils/readelf.c	2008-09-17 05:00:44.000000000 -0400
++++ binutils-2.19.1/binutils/readelf.c	2009-10-02 01:01:49.000000000 -0400
+@@ -10957,6 +10957,98 @@
+ }
+ 
+ static int
++process_fatelf (char *file_name, FILE *file)
++{
++  FatElf_External_Hdr hdr;
++  FatElf_External_Record *rec;
++  int ver, recs;
++  size_t len;
++  int ret;
++  int i;
++
++  if (fread (&hdr, sizeof (hdr), 1, file) != 1)
++    {
++      error (_("%s: Failed to read FatELF header\n"), file_name);
++      return 1;
++    }
++
++  ver = (int) byte_get_little_endian(hdr.version, sizeof (hdr.version));
++  if (ver != FATELF_FORMAT_VERSION)
++    {
++      error (_("%s: Unrecognized FatELF format version %d\n"), file_name, ver);
++      return 1;
++    }
++
++  recs = (int) hdr.num_records;
++  printf(_("%s: FatELF version %d, %d records\n"), file_name, ver, recs);
++
++  len = sizeof(FatElf_External_Record) * recs;
++  rec = (FatElf_External_Record *) malloc(len);
++  if (rec == NULL)
++    {
++      error (_("Out of memory\n"));
++      return 1;
++    }
++
++  if (fread (rec, len, 1, file) != 1)
++    {
++      free(rec);
++      error (_("%s: Failed to read FatELF records\n"), file_name);
++      return 1;
++    }
++
++  for (i = 0; i < recs; i++)
++    {
++      FatElf_External_Record *r = &rec[i];
++      const int machine = (int) byte_get_little_endian(r->machine, 2);
++
++      archive_file_size = (unsigned long) byte_get_little_endian(r->size, 8);
++      archive_file_offset = (unsigned long) byte_get_little_endian(r->offset, 8);
++
++      printf(_("\n"));
++      printf(_("FatELF record #%d:\n"), i);
++
++      printf (_("  Machine:                           %s\n"),
++	      get_machine_name (machine));
++      printf (_("  OS/ABI:                            %s\n"),
++	      get_osabi_name (r->osabi));
++      printf (_("  ABI Version:                       %d\n"),
++	      r->osabi_version);
++      printf (_("  Class:                             %s\n"),
++	      get_elf_class (r->word_size));
++      printf (_("  Data:                              %s\n"),
++	      get_data_encoding (r->byte_order));
++      printf (_("  Offset:                            %lu\n"),
++	      archive_file_offset);
++      printf (_("  Size:                              %lu\n"),
++	      archive_file_size);
++      printf (_("\n"));
++
++      if (!do_archive_index)
++        {
++          if (fseek (file, archive_file_offset, SEEK_SET))
++            {
++              error (_("%s: Unable to seek to 0x%lx\n"), file_name,
++                     archive_file_offset);
++
++              free(rec);
++              return 1;
++            }
++
++          ret = process_object (file_name, file);
++          if (ret != 0)
++            {
++              free(rec);
++              return ret;
++            }
++        }
++    }
++
++  free(rec);
++  return 0;
++}
++
++static int
+ process_file (char *file_name)
+ {
+   FILE *file;
+@@ -10994,7 +11086,12 @@
+       return 1;
+     }
+ 
+-  if (memcmp (armag, ARMAG, SARMAG) == 0)
++  if (byte_get_little_endian((unsigned char *) armag, 4) == FATELF_MAGIC)
++    {
++      rewind (file);
++      ret = process_fatelf (file_name, file);
++    }
++  else if (memcmp (armag, ARMAG, SARMAG) == 0)
+     ret = process_archive (file_name, file);
+   else
+     {
+diff -ru binutils-2.19.1-orig/elfcpp/elfcpp.h binutils-2.19.1/elfcpp/elfcpp.h
+--- binutils-2.19.1-orig/elfcpp/elfcpp.h	2008-06-12 12:58:40.000000000 -0400
++++ binutils-2.19.1/elfcpp/elfcpp.h	2009-10-02 01:01:49.000000000 -0400
+@@ -75,6 +75,40 @@
+   typedef int64_t Elf_Swxword;
+ };
+ 
++// FatELF support.
++
++// The valid values found in FatElfHdr::magic
++const int FATELFMAG0 = 0xFA;
++const int FATELFMAG1 = 0x70;
++const int FATELFMAG2 = 0x0E;
++const int FATELFMAG3 = 0x1F;
++
++// latest supported file format.
++const int FATELF_FORMAT_VERSION = 1;
++
++// FatELF values on disk are always littleendian, and align like Elf64.
++
++struct FatElf_Record
++{
++    unsigned char machine[2];     // maps to e_machine.
++    unsigned char osabi;          // maps to e_ident[EI_OSABI].
++    unsigned char osabi_version;  // maps to e_ident[EI_ABIVERSION].
++    unsigned char word_size;      // maps to e_ident[EI_CLASS].
++    unsigned char byte_order;     // maps to e_ident[EI_DATA].
++    unsigned char reserved0;
++    unsigned char reserved1;
++    unsigned char offset[8];
++    unsigned char size[8];
++};
++
++struct FatElf_Hdr
++{
++    unsigned char magic[4];  // always FATELFMAG0 .. FATELFMAG3
++    unsigned char version[2];  // latest is always FATELF_FORMAT_VERSION
++    unsigned char num_records;
++    unsigned char reserved0;
++};
++
+ // Offsets within the Ehdr e_ident field.
+ 
+ const int EI_MAG0 = 0;
+diff -ru binutils-2.19.1-orig/gold/object.cc binutils-2.19.1/gold/object.cc
+--- binutils-2.19.1-orig/gold/object.cc	2008-07-22 18:08:43.000000000 -0400
++++ binutils-2.19.1/gold/object.cc	2009-10-02 01:01:49.000000000 -0400
+@@ -1824,6 +1824,98 @@
+ namespace gold
+ {
+ 
++static inline uint16_t fatelf_convert16(const unsigned char *buf)
++{
++  return ((uint16_t) buf[0]) | (((uint16_t) buf[1]) << 8);
++}
++
++static inline uint64_t fatelf_convert64(const unsigned char *buf)
++{
++  return ( (((uint64_t) buf[0]) <<  0) |
++           (((uint64_t) buf[1]) <<  8) |
++           (((uint64_t) buf[2]) << 16) |
++           (((uint64_t) buf[3]) << 24) |
++           (((uint64_t) buf[4]) << 32) |
++           (((uint64_t) buf[5]) << 40) |
++           (((uint64_t) buf[6]) << 48) |
++           (((uint64_t) buf[7]) << 56) );
++}
++
++off_t
++parse_fatelf_records(const std::string& name, Input_file* input_file,
++		const unsigned char* p, section_offset_type bytes)
++{
++  if ( ((size_t) bytes) < sizeof (elfcpp::FatElf_Hdr) )
++    {
++      gold_error(_("%s: FatELF file too short"), name.c_str());
++      return false;
++    }
++
++  const elfcpp::FatElf_Hdr *fhdr = (elfcpp::FatElf_Hdr *) p;
++  const uint16_t version = fatelf_convert16(fhdr->version);
++
++  if (version != elfcpp::FATELF_FORMAT_VERSION)
++    {
++      gold_error(_("%s: Unrecognized FatELF version"), name.c_str());
++      return false;
++    }
++
++  const off_t filesize = input_file->file().filesize();
++  const int recs = (int) fhdr->num_records;
++  const section_size_type read_size = sizeof (elfcpp::FatElf_Record) * recs;
++  if ( filesize < ((off_t)(read_size + sizeof (elfcpp::FatElf_Hdr))) )
++    {
++      gold_error(_("%s: FatELF file too short"), name.c_str());
++      return false;
++    }
++
++  const elfcpp::FatElf_Record *rec;
++  rec = (elfcpp::FatElf_Record *) input_file->file().get_view(0,
++                                  sizeof (elfcpp::FatElf_Hdr), read_size,
++                                  false, false);
++
++  const Target &target = parameters->target();
++  const int target_size = target.get_size();
++  const bool target_big_endian = target.is_big_endian();
++  const elfcpp::EM target_machine = target.machine_code();
++
++  for (int i = 0; i < recs; i++)
++    {
++      const elfcpp::FatElf_Record *r = &rec[i];
++      const elfcpp::EM machine = (elfcpp::EM) fatelf_convert16(r->machine);
++      const uint64_t offset = fatelf_convert64(r->offset);
++      const uint64_t size = fatelf_convert64(r->size);
++      const uint64_t endpoint = (offset + size);
++      const int cls = (int) r->word_size;
++      const int endian = (int) r->byte_order;
++
++      if (machine != target_machine)
++	continue;
++      else if (cls != elfcpp::ELFCLASS32 && cls != elfcpp::ELFCLASS64)
++	continue;
++      else if ((cls == elfcpp::ELFCLASS32) && (target_size != 32))
++	continue;
++      else if ((cls == elfcpp::ELFCLASS64) && (target_size != 64))
++	continue;
++      else if ((endian != elfcpp::ELFDATA2MSB) && (target_big_endian))
++	continue;
++      else if ((endian != elfcpp::ELFDATA2LSB) && (!target_big_endian))
++	continue;
++      else if (offset > endpoint)  // overflow?
++	continue;
++      else if (endpoint > ((uint64_t) filesize))
++	continue;
++      else if ((target_size == 32) && (endpoint > 0xFFFFFFFF))
++	continue;
++
++      // we can use this ELF object!
++      return (off_t) offset;
++    }
++
++  gold_error(_("%s: No compatible FatELF records found"), name.c_str());
++  return (off_t) -1;
++}
++
+ // Read an ELF file and return the appropriate instance of Object.
+ 
+ Object*
+diff -ru binutils-2.19.1-orig/gold/object.h binutils-2.19.1/gold/object.h
+--- binutils-2.19.1-orig/gold/object.h	2008-07-25 00:25:49.000000000 -0400
++++ binutils-2.19.1/gold/object.h	2009-10-02 01:01:49.000000000 -0400
+@@ -1808,6 +1808,15 @@
+   location(size_t relnum, off_t reloffset) const;
+ };
+ 
++// Parse a FatELF header, and return the base offset of the desired system's
++//  ELF binary. Returns -1 on error, or if there isn't a compatible ELF object
++//  found, calling gold_error() with specifics. P is BYTES long, and
++//  holds the FatELF header.
++
++off_t
++parse_fatelf_records(const std::string& name, Input_file* input_file,
++		const unsigned char* p, section_offset_type bytes);
++
+ // Return an Object appropriate for the input file.  P is BYTES long,
+ // and holds the ELF header.
+ 
+diff -ru binutils-2.19.1-orig/gold/readsyms.cc binutils-2.19.1/gold/readsyms.cc
+--- binutils-2.19.1-orig/gold/readsyms.cc	2008-08-07 13:02:11.000000000 -0400
++++ binutils-2.19.1/gold/readsyms.cc	2009-10-02 01:01:49.000000000 -0400
+@@ -161,17 +161,40 @@
+ 
+   if (read_size >= 4)
+     {
++      off_t base_offset = 0;
++
++      static unsigned char fatelfmagic[4] =
++	{
++	  elfcpp::FATELFMAG0, elfcpp::FATELFMAG1,
++	  elfcpp::FATELFMAG2, elfcpp::FATELFMAG3
++	};
++
++      if (memcmp(ehdr, fatelfmagic, 4) == 0)
++	{
++	  // This is a FatELF file. Seek to correct ELF object now.
++	  base_offset = parse_fatelf_records(input_file->filename(),
++	                                     input_file, ehdr, read_size);
++	  if (base_offset < 0)
++	    return false;
++
++	  // read the actual ELF header.
++	  ehdr = input_file->file().get_view(base_offset, 0, read_size,
++	                                     true, false);
++	}
++
+       static unsigned char elfmagic[4] =
+ 	{
+ 	  elfcpp::ELFMAG0, elfcpp::ELFMAG1,
+ 	  elfcpp::ELFMAG2, elfcpp::ELFMAG3
+ 	};
++
+       if (memcmp(ehdr, elfmagic, 4) == 0)
+ 	{
+ 	  // This is an ELF object.
+ 
+ 	  Object* obj = make_elf_object(input_file->filename(),
+-					input_file, 0, ehdr, read_size);
++					input_file, base_offset, ehdr,
++					read_size);
+ 	  if (obj == NULL)
+ 	    return false;
+ 
+diff -ru binutils-2.19.1-orig/include/elf/external.h binutils-2.19.1/include/elf/external.h
+--- binutils-2.19.1-orig/include/elf/external.h	2008-03-12 04:36:58.000000000 -0400
++++ binutils-2.19.1/include/elf/external.h	2009-10-02 01:01:49.000000000 -0400
+@@ -285,4 +285,35 @@
+ 
+ #define GRP_ENTRY_SIZE		4
+ 
++
++/* FatELF support. */
++
++/* This is little endian on disk, and looks like "FA700E1F" in a hex editor. */
++#define FATELF_MAGIC (0x1F0E70FA)
++#define FATELF_FORMAT_VERSION (1)
++
++/* Values on disk are always littleendian, and align like Elf64. */
++typedef struct
++{
++    unsigned char machine[2];       /* maps to e_machine. */
++    unsigned char osabi;          /* maps to e_ident[EI_OSABI]. */
++    unsigned char osabi_version;  /* maps to e_ident[EI_ABIVERSION]. */
++    unsigned char word_size;      /* maps to e_ident[EI_CLASS]. */
++    unsigned char byte_order;     /* maps to e_ident[EI_DATA]. */
++    unsigned char reserved0;
++    unsigned char reserved1;
++    unsigned char offset[8];
++    unsigned char size[8];
++} FatElf_External_Record;
++
++/* Values on disk are always littleendian, and align like Elf64. */
++typedef struct
++{
++    unsigned char magic[4];  /* always FATELF_MAGIC */
++    unsigned char version[2]; /* latest is always FATELF_FORMAT_VERSION */
++    unsigned char num_records;
++    unsigned char reserved0;
++} FatElf_External_Hdr;
++
++
+ #endif /* _ELF_EXTERNAL_H */

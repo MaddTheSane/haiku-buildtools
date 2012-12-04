@@ -1,0 +1,73 @@
+
+Here's how to rebuild the vmware virtual machine from scratch.
+
+- Start vmware workstation.
+
+Do this twice, for amd64 and x86, in separate VMs...Name the amd64 one
+ something like "Ubuntu 9.04 FatELF" (this is the one you'll publish) and
+ the other something like "Ubuntux86tmp" (this is the one you'll throw away
+ at the end).
+
+- Create new VM.
+- Use Ubuntu 9.04 Desktop .iso, do easy install,
+  realname FatELF, username fatelf, password fatelf.
+- Log in after install, fire up a terminal.
+- Run update manager, get the latest and greatest. Click "Restart Later"
+- System -> Administration -> Login Window -> Security -> Enable Automatic Login
+- sudo apt-get install build-essential cmake mercurial openssh-server gcc-multilib
+- hg clone http://hg.icculus.org/icculus/fatelf
+- cd fatelf
+- mkdir cmake-build
+- cd cmake-build
+- cmake -DCMAKE_BUILD_TYPE=Release ..
+- make
+- sudo make install
+- cd
+- Download the fatelf version of Ubuntu .debs to the box (or feel free to spend
+  hours patching and building things):
+    They are available here: http://icculus.org/fatelf/vm/debs/
+- sudo dpkg -i *.deb
+- sudo apt-get autoremove
+-  (there's probably a better way to do this next thing.)
+- sudo mv /etc/apt/sources.list /etc/apt/DO_NOT_RUN_APT_UPDATES-sources.list-SERIOUSLY
+- Reboot to pick up new kernel.
+- sudo /usr/bin/vmware-config-tools.pl
+-  (hit enter for all questions.)
+- cd fatelf/test
+- ./test.sh  (see if anything fails. It shouldn't!)
+- sudo rm -f /boot/*-11-* /boot/memtest86+
+- Shutdown and put this disk image aside for now.
+
+
+After both virtual machines are good to go...
+
+- Add the x86 disk to the amd64 VM, so it's /dev/sdb and the amd64 one is sda.
+- Boot the amd64 virtual machine from a Ubuntu install .iso, 64 or 32 bit should do.
+- "Try Ubuntu without any change to your computer"
+- Fire up a terminal.
+- sudo mount -t ext3 -r /dev/sda1 /mnt
+- cp -av /mnt/home/fatelf/fatelf .
+- sudo umount /mnt
+- cd fatelf/merge
+- Consider setting a vmware snapshot, here.
+- sudo ./merge.sh
+- Pray everything worked, or all this time was wasted.
+- Shut down the VM.
+- Remove the .iso ... switch back to physical CD/DVD drive.
+- Restart the vm, edit the grub command line to boot from the x86 disk,
+  with root=/dev/sdb1.
+- Fire up a terminal.
+- sudo mount -t ext3 /dev/sda1 /mnt
+- Run sudo vmware-toolbox and shrink the virtual disk at /mnt.
+- sudo umount /mnt
+- Shut down.
+- Remove the x86 disk. Delete the x86 disk and VM. You're done with them.
+- Zip up the vmware files and start to upload.
+- Restart the remaining VM, make sure it worked, so you know if you have to
+  stop the upload. Should be able to choose x86 or amd64 from the grub menu
+  now.
+- Shutdown.
+- You're done!
+
+
+
