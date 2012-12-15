@@ -9,15 +9,17 @@
 
 #define FATELF_UTILS 1
 #include "fatelf-utils.h"
-#include <stdbool.h>
 
-#if TODO
+#include <errno.h>
+#include <stdbool.h>
+#include <unistd.h>
+
 static const char *exec_paths[] = {
-		"../libexec/as/",
-		"../local/libexec/as/",
-		NULL
+		"/../libexec/as/",
+		"/../local/libexec/as/",
 };
-#endif
+
+static const char *bin_path = "/bin/as";
 
 #define MAX_FILE_DEPTH 100
 
@@ -84,13 +86,14 @@ static void append_argument (arg_table *args, const char *argument) {
 	if (args->argv == NULL) {
 		args->argv_length = 10;
 		args->argv = xmalloc(sizeof(char *) * args->argv_length);
-	} else if (args->argc == args->argv_length) {
+	} else if (args->argc+1 >= args->argv_length) {
 		args->argv_length += 10;
 		args->argv = xrealloc(args->argv, sizeof(char *) * args->argv_length);
 	}
 
 	args->argv[args->argc] = xstrdup(argument);
 	args->argc++;
+	args->argv[args->argc] = NULL;
 }
 
 /* Parse an as(1) @FILE, which contains command line arguments, seperated
@@ -211,6 +214,26 @@ static void parse_arguments (arg_table *input_args,
 	}
 }
 
+/* Allocate and initialize a path to an as(1) binary. The caller is responsible
+ * for free()'ing the result. */
+static char *make_assembler_path (const char *prefix, const char *exec_path,
+		const char *fat_arch)
+{
+	char *path;
+	size_t len;
+
+	len = strlen(prefix) + strlen(exec_path) + strlen(fat_arch) +
+			strlen(bin_path) + 1;
+	path = xmalloc(len);
+
+	strcpy(path, prefix);
+	strcat(path, exec_path);
+	strcat(path, fat_arch);
+	strcat(path, bin_path);
+
+	return path;
+}
+
 int main(int argc, const char **argv)
 {
 	const char *fat_arch;
@@ -272,6 +295,7 @@ int main(int argc, const char **argv)
 		}
 	}
 
+	/* Configure the fat architecture */
 	if (fat_arch == NULL) {
 		/* Determine the host architecture */
 		const fatelf_machine_info *machine = get_machine_from_host();
@@ -285,24 +309,27 @@ int main(int argc, const char **argv)
 			fat_arch = machine->name;
 	}
 
-	// TODO! Correct path to as(1)
-	free(as_args.argv[0]);
-	as_args.argv[0] = xstrdup("as-todo");
+	/* Find the path to the as(1) binary */
+	for (i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++) {
+		const char *exec_path = exec_paths[i];
+		char *path = make_assembler_path(prefix, exec_path, fat_arch);
 
-	printf("as arguments: ");
-	for (i = 0; i < as_args.argc; i++) {
-		printf("%s ", as_args.argv[i]);
+		free(as_args.argv[0]);
+		as_args.argv[0] = path;
+
+		if (access(path, X_OK) == 0) {
+			execv(path, as_args.argv);
+			xfail("Could not execute as(1): %s", strerror(errno));
+		}
 	}
-	printf("\n");
 
-	printf("fat arguments: ");
-	for (i = 0; i < fat_args.argc; i++) {
-		printf("%s ", fat_args.argv[i]);
+	/* Report the failure, and provide a list of installed assemblers */
+	for (i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++) {
+		const char *exec_path = exec_paths[i];
+		char *path = make_assembler_path(prefix, exec_path, fat_arch);
+		fprintf(stderr, "Assembler for arch %s not found at %s\n",
+				fat_arch, path);
 	}
-	printf("\n");
-
-	if (fat_arch != NULL)
-		printf("FAT Arch: %s\n", fat_arch);
 
 	/* Clean up */
 	free(prefix);
@@ -312,7 +339,7 @@ int main(int argc, const char **argv)
 	for (i = 0; i < fat_args.argc; i++)
 		free(fat_args.argv[i]);
 
-	return 0;
+	return 1;
 } // main
 
 // end of fatelf-as.c ...
