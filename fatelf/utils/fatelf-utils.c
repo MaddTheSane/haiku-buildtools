@@ -119,6 +119,53 @@ char *xstrdup(const char *str)
     return retval;
 } // xstrdup
 
+// xfail() on error
+char *xgetexecname(const char *argv0)
+{
+    // FIXME: There are less portable OS APIs that may be used to fetch
+    // the current executable's name, but this should work on most/all
+    // systems.
+
+    // Existence of a path separator implies either an absolute or
+    // relative path
+    if (strchr(argv0, '/') != NULL) {
+        char *path = realpath(argv0, NULL);
+        if (path == NULL)
+            xfail("Could not resolve absolute path to %s", argv0);
+        return path;
+    }
+
+    // Should be relative to PATH
+    const char *PATH = getenv("PATH");
+    if (PATH != NULL) {
+        do {
+            const char *sep = strchr(PATH, ':');
+            size_t component_len;
+
+            // If only one element is found in PATH, use the whole string
+            if (sep == NULL)
+                sep = PATH + strlen(PATH);
+
+            assert(*sep == ':' || *sep == '\0');
+            component_len = sep - PATH;
+
+            // Copy out the path element
+            char *path = xmalloc(component_len + strlen(argv0) + 2);
+            strncpy(path, PATH, component_len);
+            strcat(path, "/");
+            strcat(path, argv0);
+
+            if (access(path, X_OK) == 0)
+                return path;
+
+            free(path);
+            PATH = sep + 1;
+        } while (PATH[0] != '\0');
+    }
+
+    xfail("Can not determine path to current executable");
+    return NULL;
+} // xgetexecname
 
 // xfail() on error.
 int xopen(const char *fname, const int flags, const int perms)

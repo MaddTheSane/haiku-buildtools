@@ -97,6 +97,10 @@ void *xrealloc(void *ptr, size_t size);
 // Allocate a copy of (str), xfail() on allocation failure.
 char *xstrdup(const char *str);
 
+// Determine the path to the current executable, or xfail(). Caller
+// is responsible for free()'ing returned buffer.
+char *xgetexecname(const char *argv0);
+
 // These all xfail() on error and handle EINTR for you.
 int xopen(const char *fname, const int flags, const int perms);
 ssize_t xread(const char *fname, const int fd, void *buf,
