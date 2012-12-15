@@ -272,6 +272,19 @@ int main(int argc, const char **argv)
 		}
 	}
 
+	if (fat_arch == NULL) {
+		/* Determine the host architecture */
+		const fatelf_machine_info *machine = get_machine_from_host();
+		if (machine == NULL)
+			xfail("Can not determine host machine type");
+		fat_arch = machine->name;
+	} else {
+		/* Try to map to a known architecture */
+		const fatelf_machine_info *machine = get_machine_by_name(fat_arch);
+		if (machine != NULL)
+			fat_arch = machine->name;
+	}
+
 	// TODO! Correct path to as(1)
 	free(as_args.argv[0]);
 	as_args.argv[0] = xstrdup("as-todo");
