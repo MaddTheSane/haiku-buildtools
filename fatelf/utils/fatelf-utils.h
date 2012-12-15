@@ -39,7 +39,7 @@ extern const char *fatelf_build_version;
 #define FATELF_WANT_EVERYTHING 0xFFFF
 
 #define FATELF_HOST_ENDIAN ( \
-	((union { \
+    ((union { \
         uint8_t byte; uint32_t word; \
     }) {.word = 1}).byte ? \
     FATELF_LITTLEENDIAN : FATELF_BIGENDIAN \
