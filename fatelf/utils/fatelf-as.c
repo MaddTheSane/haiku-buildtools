@@ -4,7 +4,7 @@
  * Distributed under the terms of the MIT License.
  *
  * Implements a front-end arch-aware driver for GNU as(1).
- * Based on the design of Apple's as/driver.c in cctools-836.
+ * Models the functionality of Apple's as/driver.c in cctools-836.
  */
 
 #define FATELF_UTILS 1
