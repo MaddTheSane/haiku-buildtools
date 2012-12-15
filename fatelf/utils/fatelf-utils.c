@@ -105,10 +105,10 @@ void *xmalloc(const size_t len)
 
 void *xrealloc(void *ptr, size_t size)
 {
-	void *retval = realloc(ptr, size);
-	if (retval == NULL)
-		xfail("Out of memory!");
-	return retval;
+    void *retval = realloc(ptr, size);
+    if (retval == NULL)
+        xfail("Out of memory!");
+    return retval;
 } //xrealloc
 
 // Allocate a copy of (str), xfail() on allocation failure.
@@ -640,16 +640,16 @@ const fatelf_machine_info *get_machine_by_name(const char *name)
 
 const fatelf_machine_info *get_machine_from_host(void)
 {
-	// FIXME: While portable, this is not sufficient on a variety of hosts.
-	// Ex: Darwin boots with an i386 kernel on x86-64 hardware, can still run
-	// x86-64 userspace binaries from that kernel, and defaults to building
-	// x86-64 executables.
-	struct utsname name;
+    // FIXME: While portable, this is not sufficient on a variety of hosts.
+    // Ex: Darwin boots with an i386 kernel on x86-64 hardware, can still run
+    // x86-64 userspace binaries from that kernel, and defaults to building
+    // x86-64 executables.
+    struct utsname name;
 
-	if (uname(&name) != 0)
-		xfail("uname(3) failed: %s", strerror(errno));
+    if (uname(&name) != 0)
+        xfail("uname(3) failed: %s", strerror(errno));
 
-	return get_machine_by_name(name.machine);
+    return get_machine_by_name(name.machine);
 } // get_machine_from_host
 
 const fatelf_osabi_info *get_osabi_by_id(const uint8_t id)
