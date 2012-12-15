@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <stdarg.h>
 
+#include <sys/utsname.h>
+
 const char *unlink_on_xfail = NULL;
 static uint8_t zerobuf[4096];
 
@@ -588,6 +590,16 @@ static const fatelf_osabi_info osabis[] =
     { 255, "standalone", "Standalone application" },
 };
 
+typedef struct fatelf_machine_name_alias
+{
+    const char *alias;
+    const char *name;
+} fatelf_machine_name_alias;
+
+static const fatelf_machine_name_alias machine_aliases[] = {
+    { "BePC", "i386" },
+    { "x86",  "i386" },
+};
 
 const fatelf_machine_info *get_machine_by_id(const uint16_t id)
 {
@@ -607,6 +619,15 @@ const fatelf_machine_info *get_machine_by_id(const uint16_t id)
 const fatelf_machine_info *get_machine_by_name(const char *name)
 {
     int i;
+
+    for (i = 0; i < (sizeof (machine_aliases) / sizeof (machine_aliases[0])); i++)
+    {
+        if (strcmp(machine_aliases[i].alias, name) == 0) {
+            name = machine_aliases[i].name;
+            break;
+        }
+    } // for
+
     for (i = 0; i < (sizeof (machines) / sizeof (machines[0])); i++)
     {
         if (strcmp(machines[i].name, name) == 0)
@@ -616,6 +637,15 @@ const fatelf_machine_info *get_machine_by_name(const char *name)
     return NULL;
 } // get_machine_by_name
 
+const fatelf_machine_info *get_machine_from_host(void)
+{
+	struct utsname name;
+
+	if (uname(&name) != 0)
+		xfail("uname(3) failed: %s", strerror(errno));
+
+	return get_machine_by_name(name.machine);
+} // get_machine_from_host
 
 const fatelf_osabi_info *get_osabi_by_id(const uint8_t id)
 {
