@@ -599,6 +599,7 @@ typedef struct fatelf_machine_name_alias
 static const fatelf_machine_name_alias machine_aliases[] = {
     { "BePC", "i386" },
     { "x86",  "i386" },
+    { "x86-64", "x86_64" },
 };
 
 const fatelf_machine_info *get_machine_by_id(const uint16_t id)
@@ -639,6 +640,10 @@ const fatelf_machine_info *get_machine_by_name(const char *name)
 
 const fatelf_machine_info *get_machine_from_host(void)
 {
+	// FIXME: While portable, this is not sufficient on a variety of hosts.
+	// Ex: Darwin boots with an i386 kernel on x86-64 hardware, can still run
+	// x86-64 userspace binaries from that kernel, and defaults to building
+	// x86-64 executables.
 	struct utsname name;
 
 	if (uname(&name) != 0)
