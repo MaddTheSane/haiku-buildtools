@@ -247,11 +247,8 @@ int main(int argc, const char **argv)
         return 1;
 
     /* Determine the install prefix of our binary */
-    char *prefix = realpath(argv[0], NULL);
+    char *prefix = xgetexecname(argv[0]);
     {
-        if (prefix == NULL)
-            xfail("Could not resolve absolute path to %s", argv[0]);
-
         char *prefix_tail = rindex(prefix, '/');
         if (prefix_tail == NULL)
             xfail("Could not find enclosing directory of path %s", prefix);
