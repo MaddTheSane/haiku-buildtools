@@ -209,6 +209,7 @@ static void parse_arguments (arg_table *input_args,
 
 int main(int argc, const char **argv)
 {
+	const char *fat_arch;
 	arg_table input_args;
 	arg_table as_args;
 	arg_table fat_args;
@@ -244,8 +245,28 @@ int main(int argc, const char **argv)
 	input_args.argv_length = input_args.argc;
 	input_args.argv = (char **) argv + 1;
 
-	/* Parse! */
+	/* Parse all input arguments */
 	parse_arguments(&input_args, &as_args, &fat_args, 0);
+
+	/* Parse our fat arguments */
+	fat_arch = NULL;
+	for (i = 0; i < fat_args.argc; i++) {
+		const char *arg = fat_args.argv[i];
+		if (strcmp(arg, "-arch") == 0) {
+			if (fat_arch != NULL)
+				xfail("more than one -arch option (not allowed, use cc(1) instead)");
+
+			i++;
+			if (i >= fat_args.argc)
+				xfail("missing argument to -arch option");
+
+			fat_arch = fat_args.argv[i];
+		} else {
+			/* Should never happen; these arguments have already
+			 * been validated against the list of defined fat arguments. */
+			xfail("Unknown argument %s", arg);
+		}
+	}
 
 	// TODO! Correct path to as(1)
 	free(as_args.argv[0]);
@@ -263,6 +284,10 @@ int main(int argc, const char **argv)
 	}
 	printf("\n");
 
+	if (fat_arch != NULL)
+		printf("FAT Arch: %s\n", fat_arch);
+
+	/* Clean up */
 	free(prefix);
 	for (i = 0; i < as_args.argc; i++)
 		free(as_args.argv[i]);
