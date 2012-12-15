@@ -101,6 +101,13 @@ void *xmalloc(const size_t len)
     return retval;
 } // xmalloc
 
+void *xrealloc(void *ptr, size_t size)
+{
+	void *retval = realloc(ptr, size);
+	if (retval == NULL)
+		xfail("Out of memory!");
+	return retval;
+} //xrealloc
 
 // Allocate a copy of (str), xfail() on allocation failure.
 char *xstrdup(const char *str)

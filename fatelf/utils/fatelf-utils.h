@@ -89,9 +89,10 @@ typedef struct fatelf_osabi_info
 // Report an error to stderr and terminate immediately with exit(1).
 void xfail(const char *fmt, ...) FATELF_ISPRINTF(1,2);
 
-// Wrap malloc() with an xfail(), so this returns memory or calls exit().
-// Memory is guaranteed to be initialized to zero.
+// Wrap malloc()/realloc() with an xfail(), so this returns memory or calls
+// exit(). Memory is guaranteed to be initialized to zero.
 void *xmalloc(const size_t len);
+void *xrealloc(void *ptr, size_t size);
 
 // Allocate a copy of (str), xfail() on allocation failure.
 char *xstrdup(const char *str);
