@@ -155,6 +155,15 @@ char *xgetexecname(const char *argv0)
             strcat(path, "/");
             strcat(path, argv0);
 
+            // Resolve symlinks
+            {
+                char *abspath = realpath(path, NULL);
+                if (abspath == NULL)
+                    xfail("Could not resolve absolute path to %s", abspath);
+                free(path);
+                path = abspath;
+            }
+
             if (access(path, X_OK) == 0)
                 return path;
 
