@@ -32,8 +32,12 @@ typedef struct as_flag {
 static const as_flag as_flags[] = {
 		/* opt	long_opt	accept_arg	fat_arg		single_dash (long opt) */
 		{ 'o',	NULL,		true,		false,		false	},
+		{ 'I',	NULL,		true,		false,		false	},
 		{ '\0', "defsyms",	true,		false,		false	},
-		{ '\0',	"arch",		true,		true,		true	}
+		{ '\0',	"arch",		true,		true,		true	},
+
+		// MIPS-specific arguments
+		{ 'G',	NULL,		true,		false,		false	},
 };
 
 
