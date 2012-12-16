@@ -42,6 +42,38 @@ static const as_flag as_flags[] = {
     { 'G',    NULL,        true,        false,        false    },
 };
 
+typedef struct arch_as_entry {
+    const char *arch[10];
+    const char *as_arch[10];
+} arch_as_entry;
+
+// Map -arch flags to as(1) architecture names.
+static const arch_as_entry arch_as_map[] = {
+    {
+        { "i686", "i586", "i486", "i386", NULL },
+        { "x86", "i386", NULL }
+    },
+    {
+        { "x86_64", "x86-64", NULL },
+        { "x86_64", "x86-64", NULL }
+    },
+    {
+        { "arm", "armv4t", "xscale", "armv5", "armv6", "armv7", NULL },
+        { "arm", NULL }
+    },
+    {
+        { "ppc", NULL },
+        { "powerpc", "ppc", NULL }
+    },
+    {
+        { "ppc64", NULL },
+        { "powerpc64", "ppc64", NULL }
+    },
+    {
+        { "m68k", NULL },
+        { "m68k", NULL }
+    },
+};
 
 typedef struct arg_table {
     int argc;
@@ -72,6 +104,25 @@ static const as_flag *find_flag (const char opt,
             {
                 return flag;
             }
+        }
+    }
+
+    return NULL;
+}
+
+/* Find an arch->as map entry for the given fat arch. If none is found, NULL
+ * is returned. */
+static const arch_as_entry *arch_as_lookup (const char *fat_arch) {
+    int i;
+    for (i = 0; i < sizeof(arch_as_map) / sizeof(arch_as_map[0]); i++) {
+        const arch_as_entry *entry;
+        int arch_idx;
+
+        /* See if fat_arch matches this entry */
+        entry = &arch_as_map[i];
+        for (arch_idx = 0; entry->arch[arch_idx] != NULL; arch_idx++) {
+            if (strcmp(fat_arch, entry->arch[arch_idx]) == 0)
+                return entry;
         }
     }
 
@@ -307,25 +358,47 @@ int main(int argc, const char **argv)
     }
 
     /* Find the path to the as(1) binary */
+    arg_table paths;
+    memset(&paths, 0, sizeof(paths));
+
     for (i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++) {
+        const arch_as_entry *as_arch_map = arch_as_lookup(fat_arch);
         const char *exec_path = exec_paths[i];
-        char *path = make_assembler_path(prefix, exec_path, fat_arch);
+        char *path;
+        int j;
 
-        free(as_args.argv[0]);
-        as_args.argv[0] = path;
+        /* Attempt to execute an assembler using the mapped as(1) binary names,
+         * or the default fat_arch, if no mapping is found. */
+        if (as_arch_map != NULL) {
+            for (j = 0; as_arch_map->as_arch[j] != NULL; j++) {
+                const char *as_name = as_arch_map->as_arch[j];
+                path = make_assembler_path(prefix, exec_path, as_name);
+                append_argument(&paths, path);
+                free(path);
+            }
+        } else {
+            path = make_assembler_path(prefix, exec_path, fat_arch);
+            append_argument(&paths, path);
+            free(path);
+        }
 
-        if (access(path, X_OK) == 0) {
-            execv(path, as_args.argv);
-            xfail("Could not execute as(1): %s", strerror(errno));
+        /* Try to execute the assembler */
+        for (j = 0; j < paths.argc; j++) {
+            const char *path = paths.argv[j];
+            if (access(path, X_OK) == 0) {
+                free(as_args.argv[0]);
+                as_args.argv[0] = strdup(path);
+
+                execv(path, as_args.argv);
+                xfail("Could not execute as(1): %s", strerror(errno));
+            }
         }
     }
 
     /* Report the failure, and provide a list of installed assemblers */
-    for (i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++) {
-        const char *exec_path = exec_paths[i];
-        char *path = make_assembler_path(prefix, exec_path, fat_arch);
+    for (i = 0; i < paths.argc; i++) {
         fprintf(stderr, "Assembler for arch %s not found at %s\n",
-                fat_arch, path);
+                fat_arch, paths.argv[i]);
     }
 
     /* Clean up */
