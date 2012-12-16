@@ -14,6 +14,8 @@
 
 static const char xarch_flag[] = "-Xarch_";
 
+#define MAX_FILE_DEPTH 10
+
 typedef struct arg_table {
     int argc;
     char **argv;
@@ -169,6 +171,54 @@ static void append_compiler_argument (compiler_set *compilers,
     append_argument(&c->args, argument);
 }
 
+/* Parse an gcc(1) @file, which contains command line arguments, separated
+ * by whitespace. */
+static void parse_argument_file (const char *fname, arg_table *driver_args,
+        compiler_set *compilers, int depth)
+{
+    arg_table file_args;
+    char optbuf[8192];
+    int scancount;
+    FILE *file;
+    int fd;
+    int i;
+
+    /* Protect against infinite recursion */
+    if (depth >= MAX_FILE_DEPTH)
+        xfail("Exceeded maximum number of supported @FILE includes in '%s'",
+            fname);
+
+    /* Open the input file */
+    fd = xopen(fname, O_RDONLY, 0);
+    file = fdopen(fd, "r");
+
+    /* Configure table to hold parsed arguments */
+    memset(&file_args, 0, sizeof(file_args));
+
+    do {
+        optbuf[sizeof(optbuf)-1] = '\0';
+        scancount = fscanf(file, "%8192s", optbuf);
+        if (scancount == EOF)
+            break;
+
+        if (scancount == 0)
+            xfail("Failed to parse input file: %s", fname);
+
+        if (optbuf[sizeof(optbuf)-1] != '\0')
+            xfail("Unable to handle options larger than 8192");
+
+        append_argument(&file_args, optbuf);
+    } while (1);
+
+    /* Recursively parse the input arguments */
+    parse_arguments(&file_args, driver_args, compilers, depth);
+
+    /* Clean up */
+    xclose(fname, fd);
+    for (i = 0; i < file_args.argc; i++)
+        free(file_args.argv[i]);
+}
+
 /* Parse all arguments from input_args, populating compilers and fat_args. */
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
         compiler_set *compilers, int depth)
@@ -194,7 +244,11 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
             }
         }
 
-        // TODO - handle @file
+        // Handle @file
+        if (arg[0] == '@' && arg[1] != '\0') {
+            parse_argument_file(arg+1, driver_args, compilers, depth + 1);
+            continue;
+        }
 
         const cc_flag *flag = find_flag(arg);
         if (flag == NULL) {
