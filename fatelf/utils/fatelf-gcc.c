@@ -16,6 +16,7 @@
 
 static const char xarch_flag[] = "-Xarch_";
 static const char default_output[] = "a.out";
+static const char cmd_prefix[] = "fatelf-";
 
 #define MAX_FILE_DEPTH 10
 
@@ -426,6 +427,38 @@ static char *find_compiler_bin (const char *prefix, const char *arch,
     return NULL;
 }
 
+/* Unlink all arguments in output_files */
+static void clean_output_files (arg_table *output_files) {
+    int i;
+
+    for (i = 0; i < output_files->argc; i++)
+        unlink(output_files->argv[i]);
+}
+
+static bool exec_command (arg_table *args) {
+    int ret;
+    int stat_loc;
+    pid_t pid;
+
+    pid = fork();
+    if (pid == 0) {
+        execv(args->argv[0], args->argv);
+        xfail("exec failed: %s", strerror(errno));
+    }
+
+    while ((ret = wait4(pid, &stat_loc, 0, NULL)) == -1) {
+        if (errno != EINTR)
+            break;
+    }
+
+    if (ret == -1) {
+        fprintf(stderr, "wait4() failed: %s\n", strerror(errno));
+        return false;
+    }
+
+    return true;
+}
+
 int main(int argc, const char **argv)
 {
     arg_table input_args;
@@ -439,14 +472,24 @@ int main(int argc, const char **argv)
 	if (argc < 1)
 		return 1;
 
-    /* Determine the install prefix of our binary */
+    /* Determine the install prefix of our binary, along with the target
+     * command name (gcc/g++/etc). */
     char *prefix = xgetexecname(argv[0]);
     char *cmdname;
     {
         char *prefix_tail = rindex(prefix, '/');
         if (prefix_tail == NULL)
             xfail("Could not find enclosing directory of path %s", prefix);
-        cmdname = strdup(prefix_tail+1);
+
+        /* Strip the cmd_prefix from the command, in the case where the
+         * command is executed as 'fatelf-gcc' or 'fatelf-g++'.  */
+        if (strncmp(prefix_tail+1, cmd_prefix, strlen(cmd_prefix)) == 0) {
+            cmdname = strdup(prefix_tail+1 + strlen(cmd_prefix));
+        } else {
+            cmdname = strdup(prefix_tail+1);
+        }
+
+        /* NULL terminate the prefix path */
         *prefix_tail = '\0';
     }
 
@@ -540,9 +583,9 @@ int main(int argc, const char **argv)
         /* Configure compiler output path */
         char *temp_out = strdup(output_template);
         if (mkstemp(temp_out) == -1) {
+            clean_output_files(&temp_output_args);
             xfail("Could not create temporary output file '%s': %s",
                     temp_out, strerror(errno));
-            // TODO - Cleanup is required.
         }
 
         append_argument(&c->args, "-o");
@@ -553,7 +596,13 @@ int main(int argc, const char **argv)
         free(c->args.argv[0]);
         c->args.argv[0] = find_compiler_bin(prefix, c->fat_arch, cmdname);
         if (c->args.argv[0] == NULL) {
-            // TODO - handle error. Cleanup is required.
+            clean_output_files(&temp_output_args);
+            xfail("Could not find compiler for %s in %s",c->fat_arch, prefix);
+        }
+
+        if (!exec_command(&c->args)) {
+            clean_output_files(&temp_output_args);
+            return 1;
         }
 
         free(temp_out);
@@ -575,11 +624,10 @@ int main(int argc, const char **argv)
 
     // TODO - clean up arg lists and the compiler set.
 
-    for (i = 0; i < temp_output_args.argc; i++)
-        unlink(temp_output_args.argv[i]);
+    clean_output_files(&temp_output_args);
 
     free(output_template);
     free(prefix);
     free(cmdname);
-	return 1;
+    return 0;
 }
