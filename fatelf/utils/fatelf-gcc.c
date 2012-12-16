@@ -70,8 +70,6 @@ static const cc_flag cc_flags[] = {
     // arguments the driver must be aware of
     {   "-o",       true,       true,       true,       false   },
     {   "-c",       false,      false,      false,      false   },
-    {   "-m32",     false,      true,       false,      false   },
-    {   "-m64",     false,      true,       false,      false   },
 
     // driver-specific arguments
     {   "-arch",    true,       true,       true,       false   },
@@ -81,6 +79,8 @@ static const cc_flag cc_flags[] = {
     {   "-E",       false,      false,      false,      true    },
     {   "-MD",      false,      false,      false,      true    },
     {   "-MMD",     false,      false,      false,      true    },
+    {   "-m32",     false,      false,      false,      true    },
+    {   "-m64",     false,      false,      false,      true    },
 
     // multi-argument options
     {   "-D",       true,       false,      false,      false   },
