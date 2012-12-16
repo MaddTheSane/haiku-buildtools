@@ -551,10 +551,6 @@ int main(int argc, const char **argv)
         if (strcmp(arg, "-arch") == 0) {
             i++;
             append_compiler(&compilers, driver_args.argv[i]);
-        } else if (strcmp(arg, "-m32") == 0) {
-            // TODO: m32 override
-        } else if (strcmp(arg, "-m64") == 0) {
-            // TODO: m64 override
         } else if (strcmp(arg, "-o") == 0) {
             i++;
             output_file = driver_args.argv[i];
