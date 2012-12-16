@@ -17,6 +17,7 @@
 static const char xarch_flag[] = "-Xarch_";
 static const char default_output[] = "a.out";
 static const char cmd_prefix[] = "fatelf-";
+static const char fatelf_glue_cmd[] = "fatelf-glue";
 
 #define MAX_FILE_DEPTH 10
 
@@ -400,10 +401,20 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
     }
 }
 
-/* Find a compiler binary for the given arch */
-static char *find_compiler_bin (const char *prefix, const char *arch,
+/* Find a compiler/tool binary for the given arch. If arch is NULL, a
+ * non-arch-specific binary will be found. */
+static char *find_tool_bin (const char *prefix, const char *arch,
         const char *cmdname) {
     int i, j, k;
+
+    if (arch == NULL) {
+        char *path = xmalloc(strlen(prefix) + strlen(cmdname) + 2);
+        strcpy(path, prefix);
+        strcat(path, "/");
+        strcat(path, cmdname);
+
+        return path;
+    }
 
     for (i = 0; i < sizeof(arch_cc_map)/ sizeof(arch_cc_map[0]); i++) {
         const arch_cc_entry *cc_arch = &arch_cc_map[i];
@@ -430,6 +441,18 @@ static char *find_compiler_bin (const char *prefix, const char *arch,
     return NULL;
 }
 
+/* Free all argument elements in the provided argument table */
+static void clear_arg_table (arg_table *args) {
+    int i;
+
+    for (i = 0; i < args->argc; i++) {
+        free(args->argv[i]);
+        args->argv[i] = NULL;
+    }
+
+    args->argc = 0;
+}
+
 /* Unlink all arguments in output_files */
 static void clean_output_files (arg_table *output_files) {
     int i;
@@ -438,6 +461,7 @@ static void clean_output_files (arg_table *output_files) {
         unlink(output_files->argv[i]);
 }
 
+/* Execute a command */
 static bool exec_command (arg_table *args) {
     int ret;
     int stat_loc;
@@ -467,7 +491,9 @@ int main(int argc, const char **argv)
     arg_table input_args;
     arg_table driver_args;
     arg_table nofat_args;
+    arg_table fatelf_glue_args;
     arg_table temp_output_args;
+    char *fatelf_glue_path;
 
     compiler_set compilers;
     int i;
@@ -501,10 +527,17 @@ int main(int argc, const char **argv)
     memset(&driver_args, 0, sizeof(driver_args));
     memset(&nofat_args, 0, sizeof(nofat_args));
     memset(&temp_output_args, 0, sizeof(temp_output_args));
+    memset(&fatelf_glue_args, 0, sizeof(fatelf_glue_args));
 
     input_args.argc = argc - 1;
     input_args.argv_length = input_args.argc;
     input_args.argv = (char **) argv + 1;
+
+
+    /* Find required tools */
+    fatelf_glue_path = find_tool_bin(prefix, NULL, fatelf_glue_cmd);
+    if (fatelf_glue_path == NULL)
+        xfail("Could not find %s", fatelf_glue_cmd);
 
     /* Parse all input arguments */
     parse_arguments(&input_args, &driver_args, &nofat_args, &compilers, 0);
@@ -597,7 +630,7 @@ int main(int argc, const char **argv)
 
         /* Find compiler */
         free(c->args.argv[0]);
-        c->args.argv[0] = find_compiler_bin(prefix, c->fat_arch, cmdname);
+        c->args.argv[0] = find_tool_bin(prefix, c->fat_arch, cmdname);
         if (c->args.argv[0] == NULL) {
             clean_output_files(&temp_output_args);
             xfail("Could not find compiler for %s in %s",c->fat_arch, prefix);
@@ -611,24 +644,33 @@ int main(int argc, const char **argv)
         free(temp_out);
     }
 
-    // TODO: Execute the compilers!
-    printf("Output file: %s\n", output_file);
-    for (i = 0; i < compilers.count; i++) {
-        compiler *c = compilers.compilers[i];
-        printf("%s: ", c->fat_arch);
+    /* Glue the results */
+    append_argument(&fatelf_glue_args, fatelf_glue_path);
+    append_argument(&fatelf_glue_args, output_file);
+    for (i = 0; i < temp_output_args.argc; i++)
+        append_argument(&fatelf_glue_args, temp_output_args.argv[i]);
 
-        int argi;
-        for (argi = 0; argi < c->args.argc; argi++) {
-            printf("%s ", c->args.argv[argi]);
-        }
-
-        printf("\n");
+    if (!exec_command(&fatelf_glue_args)) {
+        clean_output_files(&temp_output_args);
+        return 1;
     }
 
-    // TODO - clean up arg lists and the compiler set.
-
+    /* Clean up */
     clean_output_files(&temp_output_args);
 
+    clear_arg_table(&driver_args);
+    clear_arg_table(&nofat_args);
+    clear_arg_table(&fatelf_glue_args);
+    clear_arg_table(&temp_output_args);
+
+    for (i = 0; i < compilers.count; i++) {
+        compiler *c = compilers.compilers[i];
+        clear_arg_table(&c->args);
+        free(c->fat_arch);
+    }
+    clear_arg_table(&compilers.default_args);
+
+    free(fatelf_glue_path);
     free(output_template);
     free(prefix);
     free(cmdname);
