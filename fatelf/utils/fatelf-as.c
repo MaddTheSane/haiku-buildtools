@@ -410,6 +410,9 @@ int main(int argc, const char **argv)
     for (i = 0; i < fat_args.argc; i++)
         free(fat_args.argv[i]);
 
+    for (i = 0; i < paths.argc; i++)
+        free(paths.argv[i]);
+
     return 1;
 } // main
 
