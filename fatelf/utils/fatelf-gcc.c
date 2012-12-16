@@ -55,9 +55,8 @@ static const cc_flag cc_flags[] = {
     {   "-arch",    true,       true,       true,       false   },
 };
 
-static void append_argument (arg_table *args, const char *argument);
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
-        compiler_set *compilers, int depth);
+        arg_table *nofat_args, compiler_set *compilers, int depth);
 
 /* Look up the given option in the cc_flags table. */
 static const cc_flag *find_flag (const char *opt)
@@ -174,7 +173,7 @@ static void append_compiler_argument (compiler_set *compilers,
 /* Parse an gcc(1) @file, which contains command line arguments, separated
  * by whitespace. */
 static void parse_argument_file (const char *fname, arg_table *driver_args,
-        compiler_set *compilers, int depth)
+        arg_table *nofat_args, compiler_set *compilers, int depth)
 {
     arg_table file_args;
     char optbuf[8192];
@@ -211,7 +210,7 @@ static void parse_argument_file (const char *fname, arg_table *driver_args,
     } while (1);
 
     /* Recursively parse the input arguments */
-    parse_arguments(&file_args, driver_args, compilers, depth);
+    parse_arguments(&file_args, driver_args, nofat_args, compilers, depth);
 
     /* Clean up */
     xclose(fname, fd);
@@ -221,7 +220,7 @@ static void parse_argument_file (const char *fname, arg_table *driver_args,
 
 /* Parse all arguments from input_args, populating compilers and fat_args. */
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
-        compiler_set *compilers, int depth)
+        arg_table *nofat_args, compiler_set *compilers, int depth)
 {
     int i;
 
@@ -246,7 +245,8 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
 
         // Handle @file
         if (arg[0] == '@' && arg[1] != '\0') {
-            parse_argument_file(arg+1, driver_args, compilers, depth + 1);
+            parse_argument_file(arg+1, driver_args, nofat_args, compilers,
+                    depth + 1);
             continue;
         }
 
@@ -259,6 +259,9 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
 
             if (!flag->driver_only)
                 append_compiler_argument(compilers, arg, arch_only);
+
+            if (flag->fat_nocompat)
+                append_argument(nofat_args, arg);
 
             if (flag->accepts_arg) {
                 i++;
@@ -279,9 +282,10 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
 
 int main(int argc, const char **argv)
 {
-    arg_table interpreted_args;
     arg_table input_args;
     arg_table driver_args;
+    arg_table nofat_args;
+
     compiler_set compilers;
     int i;
 
@@ -300,14 +304,14 @@ int main(int argc, const char **argv)
     /* Initialize our input/output argument tables */
     memset(&compilers, 0, sizeof(compilers));
     memset(&driver_args, 0, sizeof(driver_args));
-    memset(&interpreted_args, 0, sizeof(interpreted_args));
+    memset(&nofat_args, 0, sizeof(nofat_args));
 
     input_args.argc = argc - 1;
     input_args.argv_length = input_args.argc;
     input_args.argv = (char **) argv + 1;
 
     /* Parse all input arguments */
-    parse_arguments(&input_args, &driver_args, &compilers, 0);
+    parse_arguments(&input_args, &driver_args, &nofat_args, &compilers, 0);
 
     /* Handle any driver-specific arguments. Note that the existence
      * of required flags has already been verified. */
@@ -321,6 +325,18 @@ int main(int argc, const char **argv)
 
         // TODO - handle additional driver opts
     }
+
+
+    /* Report any arguments incompatible with multi-arch execution */
+    if (compilers.count > 1 && nofat_args.argc > 0) {
+        for (i = 0; i < nofat_args.argc; i++) {
+            const char *arg = nofat_args.argv[i];
+            fprintf(stderr, "%s is not supported with multiple -arch flags\n",
+                    arg);
+        }
+        exit(1);
+    }
+
 
     /* If no FAT compilers found, add default */
     if (compilers.count == 0) {
