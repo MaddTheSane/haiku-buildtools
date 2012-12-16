@@ -396,9 +396,10 @@ int main(int argc, const char **argv)
     }
 
     /* Report the failure, and provide a list of installed assemblers */
+    fprintf(stderr, "Assembler for arch %s not found. Attemped paths:\n",
+            fat_arch);
     for (i = 0; i < paths.argc; i++) {
-        fprintf(stderr, "Assembler for arch %s not found at %s\n",
-                fat_arch, paths.argv[i]);
+        fprintf(stderr, "  %s\n", paths.argv[i]);
     }
 
     /* Clean up */
