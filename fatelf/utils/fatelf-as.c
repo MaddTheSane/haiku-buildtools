@@ -395,7 +395,7 @@ int main(int argc, const char **argv)
         }
     }
 
-    /* Report the failure, and provide a list of installed assemblers */
+    /* Report the failure, and provide a list of attempted paths. */
     fprintf(stderr, "Assembler for arch %s not found. Attempted paths:\n",
             fat_arch);
     for (i = 0; i < paths.argc; i++) {
