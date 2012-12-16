@@ -52,7 +52,7 @@ typedef struct arch_cc_entry {
 
 typedef struct arch_cc_march_entry {
     const char *arch_flag;
-    const char *cc_flag;
+    const char *cc_flag[3];
 } arch_cc_march_entry;
 
 // This table is used to perform interpretation of the gcc arguments
@@ -140,27 +140,28 @@ static const arch_cc_entry arch_cc_map[] = {
 
 // Map -arch flags to compiler -march= flags
 static const arch_cc_march_entry arch_cc_march_map[] = {
-    { "i486",       "-march=i486" },
-    { "i586",       "-march=i586" },
-    { "i686",       "-march=i686" },
-    { "x86_64",     "-m64" },
+    { "i386",       {"-m32", NULL }},
+    { "i486",       {"-m32", "-march=i486", NULL}},
+    { "i586",       {"-m32", "-march=i586", NULL}},
+    { "i686",       {"-m32", "-march=i686", NULL}},
+    { "x86_64",     {"-m64", NULL }},
 
-    { "arm",        "-march=armv4t" },
-    { "armv4t",     "-march=armv4t" },
-    { "armv5",      "-march=armv5tej" },
-    { "xscale",     "-march=xscale" },
-    { "armv6",      "-march=armv6k" },
-    { "armv7",      "-march=armv7a" },
+    { "arm",        {"-march=armv4t", NULL }},
+    { "armv4t",     {"-march=armv4t", NULL }},
+    { "armv5",      {"-march=armv5tej", NULL }},
+    { "xscale",     {"-march=xscale", NULL }},
+    { "armv6",      {"-march=armv6k", NULL}},
+    { "armv7",      {"-march=armv7a", NULL }},
 
-    { "ppc601",     "-mcpu=601" },
-    { "ppc603",     "-mcpu=603" },
-    { "ppc604",     "-mcpu=604" },
-    { "ppc604e",    "-mcpu=604e" },
-    { "ppc750",     "-mcpu=750" },
-    { "ppc7400",    "-mcpu=7400" },
-    { "ppc7450",    "-mcpu=7450" },
-    { "ppc970",     "-mcpu=970" },
-    { "ppc64",      "-m64" },
+    { "ppc601",     {"-m32", "-mcpu=601", NULL}},
+    { "ppc603",     {"-m32", "-mcpu=603", NULL}},
+    { "ppc604",     {"-m32", "-mcpu=604", NULL}},
+    { "ppc604e",    {"-m32", "-mcpu=604e", NULL}},
+    { "ppc750",     {"-m32", "-mcpu=750", NULL}},
+    { "ppc7400",    {"-m32", "-mcpu=7400", NULL}},
+    { "ppc7450",    {"-m32", "-mcpu=7450", NULL}},
+    { "ppc970",     {"-m32", "-mcpu=970", NULL}},
+    { "ppc64",      {"-m64", NULL}},
 };
 
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
@@ -239,7 +240,9 @@ static compiler *append_compiler (compiler_set *compilers, const char *arch) {
     for (i = 0; i < sizeof(arch_cc_march_map) / sizeof(arch_cc_march_map[0]); i++) {
         const arch_cc_march_entry *entry = &arch_cc_march_map[i];
         if (strcmp(arch, entry->arch_flag) == 0) {
-            append_argument(&c->args, entry->cc_flag);
+            int j;
+            for (j = 0; entry->cc_flag[j] != NULL; j++)
+                append_argument(&c->args, entry->cc_flag[j]);
             break;
         }
     }
