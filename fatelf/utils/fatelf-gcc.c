@@ -10,9 +10,12 @@
 #define FATELF_UTILS 1
 #include "fatelf-utils.h"
 
+#include <errno.h>
 #include <stdbool.h>
+#include <unistd.h>
 
 static const char xarch_flag[] = "-Xarch_";
+static const char default_output[] = "a.out";
 
 #define MAX_FILE_DEPTH 10
 
@@ -41,6 +44,16 @@ typedef struct cc_flag {
     const bool fat_nocompat;
 } cc_flag;
 
+typedef struct arch_cc_entry {
+    const char *arch_flag[10];
+    const char *cc_arch[10];
+} arch_cc_entry;
+
+typedef struct arch_cc_march_entry {
+    const char *arch_flag;
+    const char *cc_flag;
+} arch_cc_march_entry;
+
 // This table is used to perform interpretation of the gcc arguments
 // before passing through to GCC. The multi-argument option list is
 // needed to correctly interpret the GCC flags.
@@ -55,7 +68,7 @@ static const cc_flag cc_flags[] = {
 
     // arguments the driver must be aware of
     {   "-o",       true,       true,       true,       false   },
-    {   "-c",       false,      true,       false,      false   },
+    {   "-c",       false,      false,      false,      false   },
     {   "-m32",     false,      true,       false,      false   },
     {   "-m64",     false,      true,       false,      false   },
 
@@ -101,6 +114,52 @@ static const cc_flag cc_flags[] = {
     {   "-isystem", true,       false,      false,      false   },
     {   "-isysroot",true,       false,      false,      false   },
 
+};
+
+// Map -arch flags to compiler architecture names.
+// FIXME: These should be made non-specific to Haiku.
+static const arch_cc_entry arch_cc_map[] = {
+    {
+        { "x86_64", "i686", "i586", "i486", "i386", NULL },
+        { "x86_64-unknown-haiku", "i586-pc-haiku", NULL }
+    },
+    {
+        { "arm", "armv4t", "xscale", "armv5", "armv6", "armv7", NULL },
+        { "arm-unknown-haiku", NULL }
+    },
+    {
+        { "ppc", "ppc64", NULL },
+        { "powerpc-apple-haiku", NULL }
+    },
+    {
+        { "m68k", NULL },
+        { "m68k-unknown-haiku", NULL }
+    },
+};
+
+// Map -arch flags to compiler -march= flags
+static const arch_cc_march_entry arch_cc_march_map[] = {
+    { "i486",       "-march=i486" },
+    { "i586",       "-march=i586" },
+    { "i686",       "-march=i686" },
+    { "x86_64",     "-m64" },
+
+    { "arm",        "-march=armv4t" },
+    { "armv4t",     "-march=armv4t" },
+    { "armv5",      "-march=armv5tej" },
+    { "xscale",     "-march=xscale" },
+    { "armv6",      "-march=armv6k" },
+    { "armv7",      "-march=armv7a" },
+
+    { "ppc601",     "-mcpu=601" },
+    { "ppc603",     "-mcpu=603" },
+    { "ppc604",     "-mcpu=604" },
+    { "ppc604e",    "-mcpu=604e" },
+    { "ppc750",     "-mcpu=750" },
+    { "ppc7400",    "-mcpu=7400" },
+    { "ppc7450",    "-mcpu=7450" },
+    { "ppc970",     "-mcpu=970" },
+    { "ppc64",      "-m64" },
 };
 
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
@@ -174,6 +233,15 @@ static compiler *append_compiler (compiler_set *compilers, const char *arch) {
     // Copy in all previously parsed arguments
     for (i = 0; i < compilers->default_args.argc; i++)
         append_argument(&c->args, compilers->default_args.argv[i]);
+
+    // Add any -march flag
+    for (i = 0; i < sizeof(arch_cc_march_map) / sizeof(arch_cc_march_map[0]); i++) {
+        const arch_cc_march_entry *entry = &arch_cc_march_map[i];
+        if (strcmp(arch, entry->arch_flag) == 0) {
+            append_argument(&c->args, entry->cc_flag);
+            break;
+        }
+    }
 
     // Append to the compiler set
     compilers->count++;
@@ -328,11 +396,42 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
     }
 }
 
+/* Find a compiler binary for the given arch */
+static char *find_compiler_bin (const char *prefix, const char *arch,
+        const char *cmdname) {
+    int i, j, k;
+
+    for (i = 0; i < sizeof(arch_cc_map)/ sizeof(arch_cc_map[0]); i++) {
+        const arch_cc_entry *cc_arch = &arch_cc_map[i];
+
+        for (j = 0; cc_arch->arch_flag[j] != NULL; j++) {
+            if (strcmp(cc_arch->arch_flag[j], arch) == 0) {
+                for (k = 0; cc_arch->cc_arch[k] != NULL; k++) {
+                    const char *cc = cc_arch->cc_arch[k];
+                    char *path = xmalloc(strlen(prefix) +
+                            strlen(cc) + strlen(cmdname) + 3);
+                    strcpy(path, prefix);
+                    strcat(path, "/");
+                    strcat(path, cc);
+                    strcat(path, "-");
+                    strcat(path, cmdname);
+
+                    if (access(path, X_OK) == 0)
+                        return path;
+                }
+            }
+        }
+    }
+
+    return NULL;
+}
+
 int main(int argc, const char **argv)
 {
     arg_table input_args;
     arg_table driver_args;
     arg_table nofat_args;
+    arg_table temp_output_args;
 
     compiler_set compilers;
     int i;
@@ -342,10 +441,12 @@ int main(int argc, const char **argv)
 
     /* Determine the install prefix of our binary */
     char *prefix = xgetexecname(argv[0]);
+    char *cmdname;
     {
         char *prefix_tail = rindex(prefix, '/');
         if (prefix_tail == NULL)
             xfail("Could not find enclosing directory of path %s", prefix);
+        cmdname = strdup(prefix_tail+1);
         *prefix_tail = '\0';
     }
 
@@ -353,6 +454,7 @@ int main(int argc, const char **argv)
     memset(&compilers, 0, sizeof(compilers));
     memset(&driver_args, 0, sizeof(driver_args));
     memset(&nofat_args, 0, sizeof(nofat_args));
+    memset(&temp_output_args, 0, sizeof(temp_output_args));
 
     input_args.argc = argc - 1;
     input_args.argv_length = input_args.argc;
@@ -363,6 +465,7 @@ int main(int argc, const char **argv)
 
     /* Handle any driver-specific arguments. Note that the existence
      * of required flags has already been verified. */
+    const char *output_file = default_output;
     for (i = 0; i < driver_args.argc; i++) {
         const char *arg = driver_args.argv[i];
 
@@ -373,9 +476,10 @@ int main(int argc, const char **argv)
             // TODO: m32 override
         } else if (strcmp(arg, "-m64") == 0) {
             // TODO: m64 override
+        } else if (strcmp(arg, "-o") == 0) {
+            i++;
+            output_file = driver_args.argv[i];
         }
-
-        // TODO - handle additional driver opts
     }
 
 
@@ -389,14 +493,74 @@ int main(int argc, const char **argv)
         exit(1);
     }
 
-
     /* If no FAT compilers found, add default */
     if (compilers.count == 0) {
         const fatelf_machine_info *machine = get_machine_from_host();
         append_compiler(&compilers, machine->name);
     }
 
+    /* Generate the output file template */
+    char *output_template;
+    {
+        static const char temp_suffix[] = ".XXXXXX";
+        char *output_dir = strdup(output_file);
+        char *fname = NULL;
+
+        /* Find the directory containing the file, and the file name. */
+        char *tail = rindex(output_dir, '/');
+        if (tail != NULL) {
+            tail++;
+            fname = strdup(tail);
+            *tail = '\0';
+        }
+
+        if (fname != NULL) {
+            output_template = xmalloc(strlen(output_dir) +
+                    strlen(fname) + strlen(temp_suffix) + 2);
+            strcpy(output_template, output_dir);
+            strcat(output_template, ".");
+            strcat(output_template, fname);
+            strcat(output_template, temp_suffix);
+        } else {
+            output_template = xmalloc(strlen(output_file) +
+                    strlen(temp_suffix) + 2);
+            strcpy(output_template, ".");
+            strcat(output_template, output_file);
+            strcat(output_template, temp_suffix);
+        }
+
+        free(fname);
+        free(output_dir);
+    }
+
+    /* Perform initial compilation */
+    for (i = 0; i < compilers.count; i++) {
+        compiler *c = compilers.compilers[i];
+
+        /* Configure compiler output path */
+        char *temp_out = strdup(output_template);
+        if (mkstemp(temp_out) == -1) {
+            xfail("Could not create temporary output file '%s': %s",
+                    temp_out, strerror(errno));
+            // TODO - Cleanup is required.
+        }
+
+        append_argument(&c->args, "-o");
+        append_argument(&c->args, temp_out);
+        append_argument(&temp_output_args, temp_out);
+
+        /* Find compiler */
+        free(c->args.argv[0]);
+        c->args.argv[0] = find_compiler_bin(prefix, c->fat_arch, cmdname);
+        if (c->args.argv[0] == NULL) {
+            // TODO - handle error. Cleanup is required.
+        }
+
+        free(temp_out);
+    }
+
     // TODO: Execute the compilers!
+    printf("Output file: %s\n", output_file);
     for (i = 0; i < compilers.count; i++) {
         compiler *c = compilers.compilers[i];
         printf("%s: ", c->fat_arch);
@@ -409,6 +573,13 @@ int main(int argc, const char **argv)
         printf("\n");
     }
 
+    // TODO - clean up arg lists and the compiler set.
+
+    for (i = 0; i < temp_output_args.argc; i++)
+        unlink(temp_output_args.argv[i]);
+
+    free(output_template);
     free(prefix);
+    free(cmdname);
 	return 1;
 }
