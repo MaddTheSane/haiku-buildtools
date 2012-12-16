@@ -15,8 +15,8 @@
 #include <unistd.h>
 
 static const char *exec_paths[] = {
-        "/../libexec/as/",
-        "/../local/libexec/as/",
+    "/../libexec/as/",
+    "/../local/libexec/as/",
 };
 
 static const char *bin_path = "/bin/as";
