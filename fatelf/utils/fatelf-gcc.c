@@ -41,18 +41,66 @@ typedef struct cc_flag {
     const bool fat_nocompat;
 } cc_flag;
 
+// This table is used to perform interpretation of the gcc arguments
+// before passing through to GCC. The multi-argument option list is
+// needed to correctly interpret the GCC flags.
+//
+// If this list is out-of-sync with GCC, there's a *small* possibility of
+// collision between GCC flags and their arguments (eg, '-flag -o' would
+// interpret the '-o' as a flag, not an argument). The likelihood of
+// this occurring is low, and we have the advantage of being able to
+// update GCC and fatelf utils in lockstep.
 static const cc_flag cc_flags[] = {
     /*  opt         accepts_arg driver_flag driver_only fat_nocompat */
+
+    // arguments the driver must be aware of
     {   "-o",       true,       true,       true,       false   },
     {   "-c",       false,      true,       false,      false   },
+    {   "-m32",     false,      true,       false,      false   },
+    {   "-m64",     false,      true,       false,      false   },
+
+    // driver-specific arguments
+    {   "-arch",    true,       true,       true,       false   },
+
+    // fat-incompatible arguments
     {   "-S",       false,      false,      false,      true    },
     {   "-E",       false,      false,      false,      true    },
     {   "-MD",      false,      false,      false,      true    },
     {   "-MMD",     false,      false,      false,      true    },
-    {   "-m32",     false,      true,       false,      false   },
-    {   "-m64",     false,      true,       false,      false   },
-    // TODO - Add compiler opts that accept args
-    {   "-arch",    true,       true,       true,       false   },
+
+    // multi-argument options
+    {   "-D",       true,       false,      false,      false   },
+    {   "-U",       true,       false,      false,      false   },
+    {   "-e",       true,       false,      false,      false   },
+    {   "-T",       true,       false,      false,      false   },
+    {   "-u",       true,       false,      false,      false   },
+    {   "-I",       true,       false,      false,      false   },
+    {   "-m",       true,       false,      false,      false   },
+    {   "-x",       true,       false,      false,      false   },
+    {   "-L",       true,       false,      false,      false   },
+    {   "-A",       true,       false,      false,      false   },
+    {   "-V",       true,       false,      false,      false   },
+
+    {   "-Tdata",   true,       false,      false,      false   },
+    {   "-Ttext",   true,       false,      false,      false   },
+    {   "-Tbss",    true,       false,      false,      false   },
+    {   "-include", true,       false,      false,      false   },
+    {   "-imacros", true,       false,      false,      false   },
+    {   "-aux-info",
+                    true,       false,      false,      false   },
+    {   "-idirafter",
+                    true,       false,      false,      false   },
+    {   "-iprefix", true,       false,      false,      false   },
+    {   "-iwithprefix",
+                    true,       false,      false,      false   },
+    {   "-iwithprefixbefore",
+                    true,       false,      false,      false   },
+    {   "-iwithprefix",
+                    true,       false,      false,      false   },
+    {   "-iquote",  true,       false,      false,      false   },
+    {   "-isystem", true,       false,      false,      false   },
+    {   "-isysroot",true,       false,      false,      false   },
+
 };
 
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
@@ -321,6 +369,10 @@ int main(int argc, const char **argv)
         if (strcmp(arg, "-arch") == 0) {
             i++;
             append_compiler(&compilers, driver_args.argv[i]);
+        } else if (strcmp(arg, "-m32") == 0) {
+            // TODO: m32 override
+        } else if (strcmp(arg, "-m64") == 0) {
+            // TODO: m64 override
         }
 
         // TODO - handle additional driver opts
