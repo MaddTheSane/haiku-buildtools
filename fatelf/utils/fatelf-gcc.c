@@ -10,6 +10,10 @@
 #define FATELF_UTILS 1
 #include "fatelf-utils.h"
 
+#include <stdbool.h>
+
+static const char xarch_flag[] = "-Xarch_";
+
 typedef struct arg_table {
     int argc;
     char **argv;
@@ -21,11 +25,212 @@ typedef struct compiler {
     arg_table args;
 } compiler;
 
-//static void append_argument (arg_table *args, const char *argument);
-//static void parse_arguments (arg_table *input_args);
+typedef struct compiler_set {
+    arg_table default_args;
+    compiler **compilers;
+    size_t count;
+} compiler_set;
+
+typedef struct cc_flag {
+    const char *opt;
+    const bool accepts_arg;
+    const bool driver_flag;
+    const bool driver_only;
+    const bool fat_nocompat;
+} cc_flag;
+
+static const cc_flag cc_flags[] = {
+    /*  opt         accepts_arg driver_flag driver_only fat_nocompat */
+    {   "-o",       true,       true,       true,       false   },
+    {   "-c",       false,      true,       false,      false   },
+    {   "-S",       false,      false,      false,      true    },
+    {   "-E",       false,      false,      false,      true    },
+    {   "-MD",      false,      false,      false,      true    },
+    {   "-MMD",     false,      false,      false,      true    },
+    {   "-m32",     false,      true,       false,      false   },
+    {   "-m64",     false,      true,       false,      false   },
+    // TODO - Add compiler opts that accept args
+    {   "-arch",    true,       true,       true,       false   },
+};
+
+static void append_argument (arg_table *args, const char *argument);
+static void parse_arguments (arg_table *input_args, arg_table *driver_args,
+        compiler_set *compilers, int depth);
+
+/* Look up the given option in the cc_flags table. */
+static const cc_flag *find_flag (const char *opt)
+{
+    int i;
+
+    for (i = 0; i < sizeof(cc_flags) / sizeof(cc_flags[0]); i++) {
+        const cc_flag *flag = &cc_flags[i];
+        if (strcmp(opt, flag->opt) == 0)
+            return flag;
+    }
+
+    return NULL;
+}
+
+
+/* Append an argument to the provided args table. The caller is responsible
+ * for free()'ing the argument added to the table. */
+static void append_argument (arg_table *args, const char *argument) {
+    /* Ensure adequate space in the buffer. We grow in blocks of
+     * 10 -- this number was arbitrarily chosen. */
+    if (args->argv == NULL) {
+        args->argv_length = 10;
+        args->argv = xmalloc(sizeof(char *) * args->argv_length);
+    } else if (args->argc+1 >= args->argv_length) {
+        args->argv_length += 10;
+        args->argv = xrealloc(args->argv, sizeof(char *) * args->argv_length);
+    }
+
+    args->argv[args->argc] = xstrdup(argument);
+    args->argc++;
+    args->argv[args->argc] = NULL;
+}
+
+/* Find a compiler matching the given arch, or return NULL */
+static compiler *find_compiler (compiler_set *compilers, const char *arch) {
+    int i;
+
+    for (i = 0; i < compilers->count; i++) {
+        compiler *c = compilers->compilers[i];
+        if (strcmp(c->fat_arch, arch) == 0)
+            return c;
+    }
+
+    return NULL;
+}
+
+/* Append and return a new compiler to the compiler set for the given arch. If
+ * the architecture is already available from the compiler set, the existing
+ * compiler is returned. */
+static compiler *append_compiler (compiler_set *compilers, const char *arch) {
+    compiler *c;
+    int i;
+
+    // Prefer an existing compiler
+    c = find_compiler(compilers, arch);
+    if (c != NULL)
+        return c;
+
+    // Initialize a new compiler
+    c = xmalloc(sizeof(*c));
+    memset(c, 0, sizeof(*c));
+
+    c->fat_arch = strdup(arch);
+    append_argument(&c->args, "gcc");
+
+    // Copy in all previously parsed arguments
+    for (i = 0; i < compilers->default_args.argc; i++)
+        append_argument(&c->args, compilers->default_args.argv[i]);
+
+    // Append to the compiler set
+    compilers->count++;
+    compilers->compilers = xrealloc(compilers->compilers, compilers->count * sizeof(*c));
+    compilers->compilers[compilers->count - 1] = c;
+
+    return c;
+}
+
+/* Append a compiler argument to the compiler set. If arch_only is non-NULL,
+ * the argument will only be applied to a matching compiler. New compilers
+ * will be automatically initialized. */
+static void append_compiler_argument (compiler_set *compilers,
+        const char *argument,
+        const char *arch_only)
+{
+    int i;
+
+    // Handle non-architecture-specific arguments
+    if (arch_only == NULL) {
+        append_argument(&compilers->default_args, argument);
+        for (i = 0; i < compilers->count; i++) {
+            append_argument(&compilers->compilers[i]->args, argument);
+        }
+
+        return;
+    }
+
+    // Fetch (or create) the compiler entry
+    compiler *c = NULL;
+    for (i = 0; i < compilers->count; i++) {
+        if (strcmp(compilers->compilers[i]->fat_arch, arch_only) == 0) {
+            c = compilers->compilers[i];
+            break;
+        }
+    }
+
+    if (c == NULL)
+        c = append_compiler(compilers, arch_only);
+
+    // Apply the compiler-specific argument
+    append_argument(&c->args, argument);
+}
+
+/* Parse all arguments from input_args, populating compilers and fat_args. */
+static void parse_arguments (arg_table *input_args, arg_table *driver_args,
+        compiler_set *compilers, int depth)
+{
+    int i;
+
+    for (i = 0; i < input_args->argc; i++) {
+        const char *arg = input_args->argv[i];
+
+        // Handle -Xarch_*
+        const char *arch_only = NULL;
+        if (strncmp(arg, xarch_flag, strlen(xarch_flag)) == 0) {
+            // Extract the target architecture
+            const char *p = arg + strlen(xarch_flag);
+            if (*p != '\0') {
+                arch_only = p;
+
+                // Advance to the actual flag
+                i++;
+                if (i == input_args->argc)
+                    break;
+                arg = input_args->argv[i];
+            }
+        }
+
+        // TODO - handle @file
+
+        const cc_flag *flag = find_flag(arg);
+        if (flag == NULL) {
+            append_compiler_argument(compilers, arg, arch_only);
+        } else {
+            if (flag->driver_flag)
+                append_argument(driver_args, arg);
+
+            if (!flag->driver_only)
+                append_compiler_argument(compilers, arg, arch_only);
+
+            if (flag->accepts_arg) {
+                i++;
+
+                if (i >= input_args->argc)
+                    xfail("argument to '%s' is missing (expected 1 value)", arg);
+
+                arg = input_args->argv[i];
+                if (flag->driver_flag)
+                    append_argument(driver_args, arg);
+
+                if (!flag->driver_only)
+                    append_compiler_argument(compilers, arg, arch_only);
+            }
+        }
+    }
+}
 
 int main(int argc, const char **argv)
 {
+    arg_table interpreted_args;
+    arg_table input_args;
+    arg_table driver_args;
+    compiler_set compilers;
+    int i;
+
 	if (argc < 1)
 		return 1;
 
@@ -36,6 +241,50 @@ int main(int argc, const char **argv)
         if (prefix_tail == NULL)
             xfail("Could not find enclosing directory of path %s", prefix);
         *prefix_tail = '\0';
+    }
+
+    /* Initialize our input/output argument tables */
+    memset(&compilers, 0, sizeof(compilers));
+    memset(&driver_args, 0, sizeof(driver_args));
+    memset(&interpreted_args, 0, sizeof(interpreted_args));
+
+    input_args.argc = argc - 1;
+    input_args.argv_length = input_args.argc;
+    input_args.argv = (char **) argv + 1;
+
+    /* Parse all input arguments */
+    parse_arguments(&input_args, &driver_args, &compilers, 0);
+
+    /* Handle any driver-specific arguments. Note that the existence
+     * of required flags has already been verified. */
+    for (i = 0; i < driver_args.argc; i++) {
+        const char *arg = driver_args.argv[i];
+
+        if (strcmp(arg, "-arch") == 0) {
+            i++;
+            append_compiler(&compilers, driver_args.argv[i]);
+        }
+
+        // TODO - handle additional driver opts
+    }
+
+    /* If no FAT compilers found, add default */
+    if (compilers.count == 0) {
+        const fatelf_machine_info *machine = get_machine_from_host();
+        append_compiler(&compilers, machine->name);
+    }
+
+    // TODO: Execute the compilers!
+    for (i = 0; i < compilers.count; i++) {
+        compiler *c = compilers.compilers[i];
+        printf("%s: ", c->fat_arch);
+
+        int argi;
+        for (argi = 0; argi < c->args.argc; argi++) {
+            printf("%s ", c->args.argv[argi]);
+        }
+
+        printf("\n");
     }
 
     free(prefix);
