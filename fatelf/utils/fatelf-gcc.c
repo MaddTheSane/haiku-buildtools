@@ -611,18 +611,24 @@ int main(int argc, const char **argv)
     /* Perform initial compilation */
     for (i = 0; i < compilers.count; i++) {
         compiler *c = compilers.compilers[i];
+        char *temp_out = NULL;
 
         /* Configure compiler output path */
-        char *temp_out = strdup(output_template);
-        if (mkstemp(temp_out) == -1) {
-            clean_output_files(&temp_output_args);
-            xfail("Could not create temporary output file '%s': %s",
-                    temp_out, strerror(errno));
-        }
-
         append_argument(&c->args, "-o");
-        append_argument(&c->args, temp_out);
-        append_argument(&temp_output_args, temp_out);
+        if (compilers.count == 1) {
+            /* If building non-FAT, write to the output file directly */
+            append_argument(&c->args, output_file);
+        } else {
+            temp_out = strdup(output_template);
+            if (mkstemp(temp_out) == -1) {
+                clean_output_files(&temp_output_args);
+                xfail("Could not create temporary output file '%s': %s",
+                        temp_out, strerror(errno));
+            }
+
+            append_argument(&c->args, temp_out);
+            append_argument(&temp_output_args, temp_out);
+        }
 
         /* Find compiler */
         free(c->args.argv[0]);
@@ -637,18 +643,21 @@ int main(int argc, const char **argv)
             return 1;
         }
 
-        free(temp_out);
+        if (temp_out != NULL)
+            free(temp_out);
     }
 
     /* Glue the results */
-    append_argument(&fatelf_glue_args, fatelf_glue_path);
-    append_argument(&fatelf_glue_args, output_file);
-    for (i = 0; i < temp_output_args.argc; i++)
-        append_argument(&fatelf_glue_args, temp_output_args.argv[i]);
+    if (compilers.count > 1) {
+        append_argument(&fatelf_glue_args, fatelf_glue_path);
+        append_argument(&fatelf_glue_args, output_file);
+        for (i = 0; i < temp_output_args.argc; i++)
+            append_argument(&fatelf_glue_args, temp_output_args.argv[i]);
 
-    if (!exec_command(&fatelf_glue_args)) {
-        clean_output_files(&temp_output_args);
-        return 1;
+        if (!exec_command(&fatelf_glue_args)) {
+            clean_output_files(&temp_output_args);
+            return 1;
+        }
     }
 
     /* Clean up */
