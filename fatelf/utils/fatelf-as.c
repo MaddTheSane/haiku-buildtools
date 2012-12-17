@@ -15,8 +15,8 @@
 #include <unistd.h>
 
 static const char *exec_paths[] = {
-    "/../libexec/as/",
-    "/../local/libexec/as/",
+    "/../",
+    "/../local/",
 };
 
 static const char *bin_path = "/bin/as";
@@ -47,31 +47,33 @@ typedef struct arch_as_entry {
     const char *as_arch[10];
 } arch_as_entry;
 
-// Map -arch flags to as(1) architecture names.
+// Map -arch flags to as(1) architecture triplets.
+// FIXME: These should be made non-specific to Haiku.
 static const arch_as_entry arch_as_map[] = {
     {
         { "i686", "i586", "i486", "i386", NULL },
-        { "x86", "i386", NULL }
+        { "i686-pc-haiku", "i586-pc-haiku", "i486-pc-haiku",
+                "i386-pc-haiku", NULL }
     },
     {
         { "x86_64", "x86-64", NULL },
-        { "x86_64", "x86-64", NULL }
+        { "x86_64-unknown-haiku", NULL }
     },
     {
         { "arm", "armv4t", "xscale", "armv5", "armv6", "armv7", NULL },
-        { "arm", NULL }
+        { "arm-unknown-haiku", NULL }
     },
     {
         { "ppc", NULL },
-        { "powerpc", "ppc", NULL }
+        { "powerpc-apple-haiku", "powerpc-unknown-haiku", NULL }
     },
     {
         { "ppc64", NULL },
-        { "powerpc64", "ppc64", NULL }
+        { "powerpc64-apple-haiku", "powerpc64-unknown-haiku", NULL }
     },
     {
         { "m68k", NULL },
-        { "m68k", NULL }
+        { "m68k-unknown-haiku", NULL }
     },
 };
 
