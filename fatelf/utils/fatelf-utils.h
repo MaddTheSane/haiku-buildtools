@@ -13,8 +13,10 @@
 #include <string.h>
 #include <assert.h>
 #include <fcntl.h>
+#include <fts.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "fatelf.h"
 
@@ -109,6 +111,12 @@ ssize_t xwrite(const char *fname, const int fd,
                const void *buf, const size_t len);
 void xclose(const char *fname, const int fd);
 void xlseek(const char *fname, const int fd, const off_t o, const int whence);
+
+FTS *xfts_open(char * const *path_argv, int options,
+        int (*compar)(const FTSENT **, const FTSENT **));
+FTSENT *xfts_read(FTS *ftsp);
+FTSENT *xfts_children(FTS *ftsp, int options);
+void xfts_close(FTS *ftsp);
 
 // This writes len null bytes to (fd).
 void xwrite_zeros(const char *fname, const int fd, size_t len);

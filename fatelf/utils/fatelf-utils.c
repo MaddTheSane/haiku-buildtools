@@ -238,6 +238,63 @@ void xlseek(const char *fname, const int fd,
         xfail("Failed to seek in '%s': %s", fname, strerror(errno));
 } // xlseek
 
+// xfail() on error.
+FTS *xfts_open(char * const *path_argv, int options,
+        int (*compar)(const FTSENT **, const FTSENT **))
+{
+    FTS *ret = fts_open(path_argv, options, compar);
+    if (ret == NULL)
+        xfail("Failed to fts_open() directory tree: %s", strerror(errno));
+
+    return ret;
+} // xfts_open
+
+// xfail() if FTSENT represents a failed fts(3) result
+static void xfts_check_ftsent(FTSENT *ent) {
+    switch (ent->fts_info) {
+        case FTS_DNR:
+            xfail("Failed to read directory '%s': %s", ent->fts_path, strerror(ent->fts_errno));
+            break;
+        case FTS_ERR:
+            xfail("Failed to fts_read '%s': %s", ent->fts_path, strerror(ent->fts_errno));
+            break;
+        case FTS_NS:
+            xfail("Failed to stat file '%s': %s", ent->fts_path, strerror(ent->fts_errno));
+            break;
+        default:
+            break;
+    }
+} // xfts_check_ftsent
+
+// xfail() on error.
+FTSENT *xfts_read(FTS *ftsp) {
+    FTSENT *ret = fts_read(ftsp);
+    if (ret == NULL && errno != 0)
+        xfail("Failed to fts_read() directory node: %s", strerror(errno));
+
+    if (ret != NULL)
+        xfts_check_ftsent(ret);
+
+    return ret;
+} // xfts_read
+
+// xfail() on error.
+FTSENT *xfts_children(FTS *ftsp, int options) {
+    FTSENT *ret = xfts_children(ftsp, options);
+    if (ret == NULL && errno != 0)
+        xfail("Failed to fts_read() directory node: %s", strerror(errno));
+
+    if (ret != NULL)
+        xfts_check_ftsent(ret);
+
+    return ret;
+} // xfts_children
+
+// xfail() on error.
+void xfts_close(FTS *ftsp) {
+    if (fts_close(ftsp) != 0)
+        xfail("Failed in fts_close(): %s", strerror(errno));
+} // xfts_close
 
 uint64_t xget_file_size(const char *fname, const int fd)
 {
