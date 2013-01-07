@@ -104,13 +104,144 @@ static int fatelf_glue(const char *out, const char **bins, const int bincount)
     return 0;  // success.
 } // fatelf_glue
 
+static int fatelf_file_merge(FTSENT *ent, const char *out) {
+    switch (ent->fts_info) {
+        case FTS_DEFAULT:
+            fprintf(stderr, "OTHER: %s -> %s\n", ent->fts_accpath, out);
+            break;
+
+        case FTS_F:
+            fprintf(stderr, "FILE: %s -> %s\n", ent->fts_accpath, out);
+            break;
+
+        case FTS_D:
+            if (mkdir(out, 0700) == -1 && errno != EEXIST)
+                xfail("Failed to create directory '%s': %s", out, strerror(errno));
+            break;
+
+        case FTS_SL:
+        case FTS_SLNONE: {
+            fprintf(stderr, "LINK: %s -> %s\n", ent->fts_accpath, out);
+
+            // The link's target byte length is available via st_size
+            off_t linksize = ent->fts_statp->st_size;
+            char *linkname = xmalloc(linksize + 1);
+
+            // Read the link target
+            ssize_t len = readlink(ent->fts_accpath, linkname, linksize);
+            if (len == -1) {
+                fprintf(stderr, "Failed to read symlink '%s': %s",
+                        ent->fts_accpath, strerror(errno));
+                free(linkname);
+                return 1;
+            }
+            if (len > linksize)
+                xfail("Symlink '%s' increased in size "
+                      "between lstat() and realink()", ent->fts_accpath);
+
+            // NULL terminate
+            linkname[linksize] = '\0';
+
+            // Create the link
+            if (symlink(linkname, out) == -1 && errno != EEXIST) {
+                xfail("Failed to create symlink '%s': %s", out,
+                      strerror(errno));
+                free(linkname);
+                return 1;
+            }
+
+            free(linkname);
+            break;
+        }
+
+        default:
+            fprintf(stderr, "Skipping unknown file type '%s'", ent->fts_accpath);
+            return 1;
+    }
+
+    xcopyfile_attr(ent->fts_accpath, out);
+    return 0;
+}
+
+static int fatelf_recursive_glue(const char *outdir, const char **dirs,
+    const int dircount)
+{
+    FTS *tree;
+    FTSENT *ent;
+    size_t outlen;
+    int i;
+
+    outlen = strlen(outdir);
+
+    // fts(3) requires a NULL-terminated array
+    for (i = 0; i < dircount; i++) {
+        const char *dir = dirs[i];
+        const char *path_argv[] = { dir, NULL };
+
+        tree = xfts_open((char * const *) path_argv, FTS_NOCHDIR|FTS_PHYSICAL, NULL);
+        while ((ent = xfts_read(tree)) != NULL) {
+            char *target;
+            {
+                size_t target_len;
+                const char *relpath;
+
+                relpath = ent->fts_path + strlen(dir);
+                target_len = outlen + strlen(relpath) + 1;
+                target = xmalloc(target_len);
+
+                strncpy(target, outdir, target_len);
+                strncat(target, relpath, target_len-outlen);
+            }
+
+            // Skip post-order visited directories
+            if (ent->fts_info == FTS_DP)
+                continue;
+
+            fatelf_file_merge(ent, target);
+        }
+
+        xfts_close(tree);
+    }
+
+    return 0;  // success
+} // fatelf_recursive_glue
+
+
+static void xusage (const char *argv0) {
+    xfail("USAGE:\n"
+          "  %s <out> <bin1> <bin2> [... binN]\n"
+          "  %s -r <out> <dir1> <dir2> [... dirN]", argv0, argv0);
+} // xusage
 
 int main(int argc, const char **argv)
 {
+    const char *argv0 = argv[0];
+    int rflag = 0;
+    int ch;
+
     xfatelf_init(argc, argv);
-    if (argc < 4)  // this could stand to use getopt(), later.
-        xfail("USAGE: %s <out> <bin1> <bin2> [... binN]", argv[0]);
-    return fatelf_glue(argv[1], &argv[2], argc - 2);
+    while ((ch = getopt(argc, (char **) argv, "r"))  != -1) {
+       switch (ch) {
+           case 'r':
+               rflag = 1;
+               break;
+
+           default:
+               xusage(argv0);
+               break;
+       }
+    }
+    argc -= optind;
+    argv += optind;
+
+    if (argc < 2)
+        xusage(argv0);
+
+    if (rflag) {
+        return fatelf_recursive_glue(argv[0], &argv[1], argc - 1);
+    } else {
+        return fatelf_glue(argv[0], &argv[1], argc - 1);
+    }
 } // main
 
 // end of fatelf-glue.c ...

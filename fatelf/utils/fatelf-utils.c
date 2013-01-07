@@ -12,7 +12,6 @@
 #include "fatelf-utils.h"
 #include "fatelf-haiku.h"
 
-#include <errno.h>
 #include <unistd.h>
 #include <stdarg.h>
 
@@ -129,9 +128,7 @@ char *xgetexecname(const char *argv0)
     // Existence of a path separator implies either an absolute or
     // relative path
     if (strchr(argv0, '/') != NULL) {
-        char *path = realpath(argv0, NULL);
-        if (path == NULL)
-            xfail("Could not resolve absolute path to %s", argv0);
+        char *path = xrealpath(argv0, NULL);
         return path;
     }
 
@@ -157,9 +154,7 @@ char *xgetexecname(const char *argv0)
 
             // Resolve symlinks
             {
-                char *abspath = realpath(path, NULL);
-                if (abspath == NULL)
-                    xfail("Could not resolve absolute path to %s", abspath);
+                char *abspath = xrealpath(path, NULL);
                 free(path);
                 path = abspath;
             }
@@ -238,6 +233,11 @@ void xlseek(const char *fname, const int fd,
         xfail("Failed to seek in '%s': %s", fname, strerror(errno));
 } // xlseek
 
+void xmkdir(const char *fname, mode_t mode) {
+    if (mkdir(fname, mode) == -1)
+        xfail("Failed to create directory '%s': %s", fname, strerror(errno));
+}
+
 // xfail() on error.
 FTS *xfts_open(char * const *path_argv, int options,
         int (*compar)(const FTSENT **, const FTSENT **))
@@ -250,7 +250,8 @@ FTS *xfts_open(char * const *path_argv, int options,
 } // xfts_open
 
 // xfail() if FTSENT represents a failed fts(3) result
-static void xfts_check_ftsent(FTSENT *ent) {
+static void xfts_check_ftsent(FTSENT *ent)
+{
     switch (ent->fts_info) {
         case FTS_DNR:
             xfail("Failed to read directory '%s': %s", ent->fts_path, strerror(ent->fts_errno));
@@ -267,7 +268,8 @@ static void xfts_check_ftsent(FTSENT *ent) {
 } // xfts_check_ftsent
 
 // xfail() on error.
-FTSENT *xfts_read(FTS *ftsp) {
+FTSENT *xfts_read(FTS *ftsp)
+{
     FTSENT *ret = fts_read(ftsp);
     if (ret == NULL && errno != 0)
         xfail("Failed to fts_read() directory node: %s", strerror(errno));
@@ -279,7 +281,8 @@ FTSENT *xfts_read(FTS *ftsp) {
 } // xfts_read
 
 // xfail() on error.
-FTSENT *xfts_children(FTS *ftsp, int options) {
+FTSENT *xfts_children(FTS *ftsp, int options)
+{
     FTSENT *ret = xfts_children(ftsp, options);
     if (ret == NULL && errno != 0)
         xfail("Failed to fts_read() directory node: %s", strerror(errno));
@@ -291,10 +294,22 @@ FTSENT *xfts_children(FTS *ftsp, int options) {
 } // xfts_children
 
 // xfail() on error.
-void xfts_close(FTS *ftsp) {
+void xfts_close(FTS *ftsp)
+{
     if (fts_close(ftsp) != 0)
         xfail("Failed in fts_close(): %s", strerror(errno));
 } // xfts_close
+
+
+// xfail() on error.
+char *xrealpath(const char *file_name, char *resolved_name)
+{
+    char *path = realpath(file_name, resolved_name);
+    if (path == NULL)
+        xfail("Could not resolve absolute path to %s", file_name);
+
+    return path;
+} // xrealpath
 
 uint64_t xget_file_size(const char *fname, const int fd)
 {
@@ -304,6 +319,11 @@ uint64_t xget_file_size(const char *fname, const int fd)
     return (uint64_t) statbuf.st_size;
 } // xget_file_size
 
+// xfail() on error
+void xcopyfile_attr(const char *in, const char *out)
+{
+    // TODO - Copy permissions, ACLs, EAs.
+}
 
 static uint8_t copybuf[256 * 1024];
 
