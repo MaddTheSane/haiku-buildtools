@@ -121,57 +121,135 @@ static const char *file_type_name (mode_t mode) {
     }
 }
 
-static void xverify_file_matches (FTSENT *in, const char *out) {
-    struct stat st;
-    xlstat(out, &st);
+static void xverify_file_matches (const char *f1, const char *f2) {
+    struct stat st1, st2;
+    xlstat(f1, &st1);
+    xlstat(f2, &st2);
 
     // Check the file type
-    if ((in->fts_statp->st_mode & S_IFMT) != (st.st_mode & S_IFMT))
-        xfail("File '%s' already exists and is not a %s.", out,
-            file_type_name(in->fts_statp->st_mode));
+    if ((st1.st_mode & S_IFMT) != (st2.st_mode & S_IFMT))
+        xfail("File '%s' is of a different type than '%s'", f1, f2);
 
     // TODO - Verify the contents?
 }
 
-static int fatelf_file_merge(FTSENT *ent, const char *out) {
-    switch (ent->fts_info) {
-        case FTS_DEFAULT:
-            xfail("Unsupported input file type of %s",
-                file_type_name(ent->fts_statp->st_mode));
-            break;
+static int fatelf_merge_files(const char *out, const char **files,
+    const int filecount)
+{
+    struct stat st;
 
-        case FTS_F:
-            fprintf(stderr, "FILE: %s -> %s\n", ent->fts_accpath, out);
-            break;
+    if (filecount == 0)
+        return 0;
 
-        case FTS_D:
+    const char *in = files[0];
+
+    xlstat(in, &st);
+    switch (st.st_mode & S_IFMT) {
+        case S_IFDIR:
+            //fprintf(stderr, "DIR: %s -> %s\n", in, out);
+
             if (mkdir(out, 0700) == -1) {
                 if (errno == EEXIST)
-                    xverify_file_matches(ent, out);
+                    xverify_file_matches(in, out);
                 else
-                    xfail("Failed to create directory '%s': %s", out, strerror(errno));
+                    xfail("Failed to create directory '%s': %s", out,
+                        strerror(errno));
             }
             break;
+            break;
 
-        case FTS_SL:
-        case FTS_SLNONE: {
-            fprintf(stderr, "LINK: %s -> %s\n", ent->fts_accpath, out);
+        case S_IFREG: {
+            int i;
+
+            // Determine if this is an ELF file
+            int elfd = xopen(in, O_RDONLY, 0600);
+            uint8_t magic[4];
+            xread(in, elfd, &magic, sizeof(magic), 1);
+            if (memcmp(magic, (uint8_t[]){ 0x7F, 'E', 'L', 'F' },
+                sizeof(magic)) == 0 && filecount > 1)
+            {
+                fatelf_glue(out, files, filecount);
+            } else {
+                size_t bufsize = 4096;
+                int fds[filecount];
+                ssize_t nread[filecount];
+                uint8_t **buffers = xmalloc(sizeof(void *) * filecount);
+                off_t nleft = st.st_size;
+                int outfd = xopen(out, O_WRONLY|O_CREAT|O_TRUNC, 0600);
+
+                for (i = 0; i < filecount; i++) {
+                    buffers[i] = xmalloc(bufsize);
+                    fds[i] = xopen(files[i], O_RDONLY, 0600);
+                }
+
+                // As per POSIX, this read() on a regular file can not be short
+                // unless EOF is hit.
+                // http://pubs.opengroup.org/onlinepubs/9699919799/functions/read.html
+                while (nleft > 0) {
+                    for (i = 0; i < filecount; i++) {
+                        if (fds[i] == -1)
+                            continue;
+
+                        nread[i] = xread(files[i], fds[i], buffers[i], bufsize, 0);
+
+                        if (i > 0) {
+                            /* Check for file equality */
+                            if (nread[i] != nread[0]) {
+                                fprintf(stderr, "Files '%s' and '%s' differ in length\n", files[i], files[0]);
+                                xclose(files[i], fds[i]);
+                                fds[i] = -1;
+                                continue;
+                            }
+
+                            if (memcmp(buffers[0], buffers[i], nread[0]) != 0) {
+                                fprintf(stderr, "Files '%s' and '%s' differ\n", files[i], files[0]);
+                                xclose(files[i], fds[i]);
+                                fds[i] = -1;
+                                continue;
+                            }
+
+                        } else if (i == 0) {
+                            /* Write to output */
+                            xwrite(out, outfd, buffers[i], nread[i]);
+                        }
+                    }
+
+                    nleft -= nread[0];
+                }
+
+
+                //fprintf(stderr, "FILE: %s -> %s\n", in, out);
+
+                for (i = 0; i < filecount; i++) {
+                    free(buffers[i]);
+                    if (fds[i] != -1)
+                        xclose(files[i], fds[i]);
+                }
+
+                free(buffers);
+                xclose(out, outfd);
+            }
+            break;
+        }
+
+        case S_IFLNK: {
+            //fprintf(stderr, "LINK: %s -> %s\n", in, out);
 
             // The link's target byte length is available via st_size
-            off_t linksize = ent->fts_statp->st_size;
+            off_t linksize = st.st_size;
             char *linkname = xmalloc(linksize + 1);
 
             // Read the link target
-            ssize_t len = readlink(ent->fts_accpath, linkname, linksize);
+            ssize_t len = readlink(in, linkname, linksize);
             if (len == -1) {
                 fprintf(stderr, "Failed to read symlink '%s': %s",
-                        ent->fts_accpath, strerror(errno));
+                        in, strerror(errno));
                 free(linkname);
                 return 1;
             }
             if (len > linksize)
                 xfail("Symlink '%s' increased in size "
-                      "between lstat() and realink()", ent->fts_accpath);
+                      "between lstat() and realink()", in);
 
             // NULL terminate
             linkname[linksize] = '\0';
@@ -179,7 +257,7 @@ static int fatelf_file_merge(FTSENT *ent, const char *out) {
             // Create the link
             if (symlink(linkname, out) == -1) {
                 if (errno == EEXIST) {
-                    xverify_file_matches(ent, out);
+                    xverify_file_matches(in, out);
                 } else {
                     xfail("Failed to create symlink '%s': %s", out,
                           strerror(errno));
@@ -189,13 +267,15 @@ static int fatelf_file_merge(FTSENT *ent, const char *out) {
             free(linkname);
             break;
         }
-
         default:
-            fprintf(stderr, "Skipping unknown file type '%s'", ent->fts_accpath);
-            return 1;
+            xfail("Unsupported input file type of %s",
+                file_type_name(st.st_mode));
+            break;
     }
 
-    xcopyfile_attr(ent->fts_accpath, out);
+    // TODO : Verify this only once? Check the differences?
+    xcopyfile_attr(in, out);
+
     return 0;
 }
 
@@ -216,12 +296,22 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
 
         tree = xfts_open((char * const *) path_argv, FTS_NOCHDIR|FTS_PHYSICAL, NULL);
         while ((ent = xfts_read(tree)) != NULL) {
+            const char *files[dircount];
+            int filecount;
+            const char *relpath;
+            size_t relpath_len;
             char *target;
+            struct stat st;
+            int j;
+
+            // Skip post-order visited directories
+            if (ent->fts_info == FTS_DP)
+                continue;
+
             {
                 size_t target_len;
-                const char *relpath;
-
                 relpath = ent->fts_path + strlen(dir);
+                relpath_len = strlen(relpath);
                 target_len = outlen + strlen(relpath) + 1;
                 target = xmalloc(target_len);
 
@@ -229,11 +319,29 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
                 strncat(target, relpath, target_len-outlen);
             }
 
-            // Skip post-order visited directories
-            if (ent->fts_info == FTS_DP)
-                continue;
+            // Build up the list of input files
+            filecount = 0;
+            for (j = 0; j < dircount; j++) {
+                const char *dir = dirs[j];
+                size_t inpath_len = strlen(dir) + relpath_len + 1;
+                char *inpath = xmalloc(inpath_len);
 
-            fatelf_file_merge(ent, target);
+                strcpy(inpath, dir);
+                strcat(inpath, relpath);
+
+                if (lstat(inpath, &st) == 0) {
+                    files[filecount] = inpath;
+                    filecount++;
+
+                    if (filecount > 0)
+                        xverify_file_matches(inpath, files[0]);
+                }
+            }
+
+            assert(filecount > 0);
+
+            fatelf_merge_files(target, files, filecount);
+            free(target);
         }
 
         xfts_close(tree);
