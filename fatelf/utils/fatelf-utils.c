@@ -233,10 +233,26 @@ void xlseek(const char *fname, const int fd,
         xfail("Failed to seek in '%s': %s", fname, strerror(errno));
 } // xlseek
 
-void xmkdir(const char *fname, mode_t mode) {
+// xfail() on error
+void xmkdir(const char *fname, mode_t mode)
+{
     if (mkdir(fname, mode) == -1)
         xfail("Failed to create directory '%s': %s", fname, strerror(errno));
-}
+} // xmkdir()
+
+// xfail() on error.
+void xstat(const char *fname, struct stat *buf)
+{
+    if (stat(fname, buf) == -1)
+        xfail("Failed to stat file '%s': %s", fname, strerror(errno));
+} // xstat()
+
+// xfail() on error.
+void xlstat(const char *fname, struct stat *buf)
+{
+    if (lstat(fname, buf) == -1)
+        xfail("Failed to stat file '%s': %s", fname, strerror(errno));
+} // xlstat()
 
 // xfail() on error.
 FTS *xfts_open(char * const *path_argv, int options,

@@ -114,6 +114,8 @@ ssize_t xwrite(const char *fname, const int fd,
 void xclose(const char *fname, const int fd);
 void xlseek(const char *fname, const int fd, const off_t o, const int whence);
 void xmkdir(const char *fname, mode_t mode);
+void xstat(const char *fname, struct stat *buf);
+void xlstat(const char *fname, struct stat *buf);
 
 FTS *xfts_open(char * const *path_argv, int options,
         int (*compar)(const FTSENT **, const FTSENT **));

@@ -104,10 +104,40 @@ static int fatelf_glue(const char *out, const char **bins, const int bincount)
     return 0;  // success.
 } // fatelf_glue
 
+static const char *file_type_name (mode_t mode) {
+    switch (mode & S_IFMT) {
+        case S_IFIFO: return "fifo";
+        case S_IFCHR: return "character device";
+        case S_IFDIR: return "directory";
+        case S_IFBLK: return "block device";
+        case S_IFREG: return "file";
+        case S_IFLNK: return "symbolic link";
+        case S_IFSOCK: return "socket";
+#ifdef S_IFWHT
+        case S_IFWHT: return "white out";
+#endif
+
+        default: return "unknown type";
+    }
+}
+
+static void xverify_file_matches (FTSENT *in, const char *out) {
+    struct stat st;
+    xlstat(out, &st);
+
+    // Check the file type
+    if ((in->fts_statp->st_mode & S_IFMT) != (st.st_mode & S_IFMT))
+        xfail("File '%s' already exists and is not a %s.", out,
+            file_type_name(in->fts_statp->st_mode));
+
+    // TODO - Verify the contents?
+}
+
 static int fatelf_file_merge(FTSENT *ent, const char *out) {
     switch (ent->fts_info) {
         case FTS_DEFAULT:
-            fprintf(stderr, "OTHER: %s -> %s\n", ent->fts_accpath, out);
+            xfail("Unsupported input file type of %s",
+                file_type_name(ent->fts_statp->st_mode));
             break;
 
         case FTS_F:
@@ -115,8 +145,12 @@ static int fatelf_file_merge(FTSENT *ent, const char *out) {
             break;
 
         case FTS_D:
-            if (mkdir(out, 0700) == -1 && errno != EEXIST)
-                xfail("Failed to create directory '%s': %s", out, strerror(errno));
+            if (mkdir(out, 0700) == -1) {
+                if (errno == EEXIST)
+                    xverify_file_matches(ent, out);
+                else
+                    xfail("Failed to create directory '%s': %s", out, strerror(errno));
+            }
             break;
 
         case FTS_SL:
@@ -143,11 +177,13 @@ static int fatelf_file_merge(FTSENT *ent, const char *out) {
             linkname[linksize] = '\0';
 
             // Create the link
-            if (symlink(linkname, out) == -1 && errno != EEXIST) {
-                xfail("Failed to create symlink '%s': %s", out,
-                      strerror(errno));
-                free(linkname);
-                return 1;
+            if (symlink(linkname, out) == -1) {
+                if (errno == EEXIST) {
+                    xverify_file_matches(ent, out);
+                } else {
+                    xfail("Failed to create symlink '%s': %s", out,
+                          strerror(errno));
+                }
             }
 
             free(linkname);
