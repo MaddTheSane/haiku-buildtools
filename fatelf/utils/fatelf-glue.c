@@ -127,17 +127,18 @@ static int fatelf_merge_files(const char *out, const char **files,
             break;
 
         case S_IFREG: {
+            int binfd = xopen(in, O_RDONLY, 0600);
+            int binfmt = xidentify_binary(in, binfd, 0);
             int i;
 
             // Determine if this is an ELF file
-            int elfd = xopen(in, O_RDONLY, 0600);
-            uint8_t magic[4];
-            xread(in, elfd, &magic, sizeof(magic), 1);
-            if (memcmp(magic, (uint8_t[]){ 0x7F, 'E', 'L', 'F' },
-                sizeof(magic)) == 0 && filecount > 1)
-            {
+            if (binfmt == FATELF_FILE_ELF) {
                 fatelf_glue(out, files, filecount);
-            } else if (0 /* ar archive header */) {
+            } else if (binfmt == FATELF_FILE_AR) {
+                // TODO
+                fprintf(stderr, "Found an ar archive: %s\n", in);
+            } else if (binfmt == FATELF_FILE_FAT) {
+                xfail("Merging of FatELF files ('%s') is not supported", in);
             } else {
                 size_t bufsize = 4096;
                 int fds[filecount];

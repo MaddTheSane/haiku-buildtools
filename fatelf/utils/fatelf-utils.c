@@ -11,6 +11,8 @@
 #define FATELF_UTILS 1
 #include "fatelf-utils.h"
 #include "fatelf-haiku.h"
+#include "elf.h"
+#include "ar.h"
 
 #include <unistd.h>
 #include <stdarg.h>
@@ -635,6 +637,29 @@ void xverify_file_type_matches (const char *f1, const char *f2) {
     if ((st1.st_mode & S_IFMT) != (st2.st_mode & S_IFMT))
         xfail("File '%s' is of a different type than '%s'", f1, f2);
 } // xverify_file_type_matches
+
+
+int xidentify_binary (const char *fname, const int fd, const off_t offset) {
+    uint8_t magic[8];
+    uint32_t fatelf_magic;
+
+    xlseek(fname, fd, offset, SEEK_SET);
+    xread(fname, fd, magic, 4, true);
+    if (memcmp(ELF_MAGIC, magic, 4) == 0)
+        return FATELF_FILE_ELF;
+
+    getui32(magic, &fatelf_magic);
+    if (fatelf_magic == FATELF_MAGIC)
+        return FATELF_FILE_FAT;
+
+    xlseek(fname, fd, offset, SEEK_SET);
+    xread(fname, fd, magic, 8, true);
+    if (strncmp(ARMAG, (const char *) magic, SARMAG) == 0)
+        return FATELF_FILE_AR;
+
+    return FATELF_FILE_UNKNOWN;
+} // xidentify_binary
+
 
 // !!! FIXME: these names/descs aren't set in stone.
 // List from: http://www.sco.com/developers/gabi/latest/ch4.eheader.html

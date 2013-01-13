@@ -44,6 +44,11 @@ extern const char *fatelf_build_version;
 #define FATELF_WANT_BYTEORDER (1 << 4)
 #define FATELF_WANT_EVERYTHING 0xFFFF
 
+#define FATELF_FILE_UNKNOWN   0
+#define FATELF_FILE_ELF       1
+#define FATELF_FILE_FAT       2
+#define FATELF_FILE_AR        3
+
 #define FATELF_HOST_ENDIAN ( \
     ((union { \
         uint8_t byte; uint32_t word; \
@@ -176,6 +181,9 @@ const char *file_type_name (mode_t mode);
 
 // Verify the file type of f1 matches f2
 void xverify_file_type_matches (const char *f1, const char *f2);
+
+// Identify binary type, returning one of the FATELF_FILE_* constants
+int xidentify_binary (const char *fname, const int fd, const off_t offset);
 
 // Align a value to the page size.
 uint64_t align_to_page(const uint64_t offset);
