@@ -104,23 +104,6 @@ static int fatelf_glue(const char *out, const char **bins, const int bincount)
     return 0;  // success.
 } // fatelf_glue
 
-static const char *file_type_name (mode_t mode) {
-    switch (mode & S_IFMT) {
-        case S_IFIFO: return "fifo";
-        case S_IFCHR: return "character device";
-        case S_IFDIR: return "directory";
-        case S_IFBLK: return "block device";
-        case S_IFREG: return "file";
-        case S_IFLNK: return "symbolic link";
-        case S_IFSOCK: return "socket";
-#ifdef S_IFWHT
-        case S_IFWHT: return "white out";
-#endif
-
-        default: return "unknown type";
-    }
-}
-
 static void xverify_file_matches (const char *f1, const char *f2) {
     struct stat st1, st2;
     xlstat(f1, &st1);
@@ -146,8 +129,6 @@ static int fatelf_merge_files(const char *out, const char **files,
     xlstat(in, &st);
     switch (st.st_mode & S_IFMT) {
         case S_IFDIR:
-            //fprintf(stderr, "DIR: %s -> %s\n", in, out);
-
             if (mkdir(out, 0700) == -1) {
                 if (errno == EEXIST)
                     xverify_file_matches(in, out);
@@ -155,7 +136,6 @@ static int fatelf_merge_files(const char *out, const char **files,
                     xfail("Failed to create directory '%s': %s", out,
                         strerror(errno));
             }
-            break;
             break;
 
         case S_IFREG: {
@@ -169,6 +149,7 @@ static int fatelf_merge_files(const char *out, const char **files,
                 sizeof(magic)) == 0 && filecount > 1)
             {
                 fatelf_glue(out, files, filecount);
+            } else if (0 /* ar archive header */) {
             } else {
                 size_t bufsize = 4096;
                 int fds[filecount];
@@ -182,9 +163,8 @@ static int fatelf_merge_files(const char *out, const char **files,
                     fds[i] = xopen(files[i], O_RDONLY, 0600);
                 }
 
-                // As per POSIX, this read() on a regular file can not be short
-                // unless EOF is hit.
-                // http://pubs.opengroup.org/onlinepubs/9699919799/functions/read.html
+                // read in data from all input files, check for equality, and
+                // then write to the output
                 while (nleft > 0) {
                     for (i = 0; i < filecount; i++) {
                         if (fds[i] == -1)
@@ -217,9 +197,7 @@ static int fatelf_merge_files(const char *out, const char **files,
                     nleft -= nread[0];
                 }
 
-
-                //fprintf(stderr, "FILE: %s -> %s\n", in, out);
-
+                // Clean up
                 for (i = 0; i < filecount; i++) {
                     free(buffers[i]);
                     if (fds[i] != -1)
@@ -233,8 +211,6 @@ static int fatelf_merge_files(const char *out, const char **files,
         }
 
         case S_IFLNK: {
-            //fprintf(stderr, "LINK: %s -> %s\n", in, out);
-
             // The link's target byte length is available via st_size
             off_t linksize = st.st_size;
             char *linkname = xmalloc(linksize + 1);

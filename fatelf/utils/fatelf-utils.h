@@ -169,6 +169,9 @@ int xfind_junk(const char *fname, const int fd, uint64_t *offset,
 void xappend_junk(const char *fname, const int fd,
                   const char *out, const int outfd);
 
+// Return a descriptive name for the given mode_t's file type
+const char *file_type_name (mode_t mode);
+
 // Align a value to the page size.
 uint64_t align_to_page(const uint64_t offset);
 

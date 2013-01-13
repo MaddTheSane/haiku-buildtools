@@ -607,6 +607,22 @@ uint64_t align_to_page(const uint64_t offset)
     return overflow ? (offset + (pagesize - overflow)) : offset;
 } // align_to_page
 
+const char *file_type_name (mode_t mode) {
+    switch (mode & S_IFMT) {
+        case S_IFIFO: return "fifo";
+        case S_IFCHR: return "character device";
+        case S_IFDIR: return "directory";
+        case S_IFBLK: return "block device";
+        case S_IFREG: return "file";
+        case S_IFLNK: return "symbolic link";
+        case S_IFSOCK: return "socket";
+#ifdef S_IFWHT
+        case S_IFWHT: return "white out";
+#endif
+
+        default: return "unknown type";
+    }
+} // file_type_name
 
 // !!! FIXME: these names/descs aren't set in stone.
 // List from: http://www.sco.com/developers/gabi/latest/ch4.eheader.html
