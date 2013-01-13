@@ -119,7 +119,7 @@ ssize_t xread(const char *fname, const int fd, void *buf,
 ssize_t xwrite(const char *fname, const int fd,
                const void *buf, const size_t len);
 void xclose(const char *fname, const int fd);
-void xlseek(const char *fname, const int fd, const off_t o, const int whence);
+off_t xlseek(const char *fname, const int fd, const off_t o, const int whence);
 void xmkdir(const char *fname, mode_t mode);
 void xstat(const char *fname, struct stat *buf);
 void xlstat(const char *fname, struct stat *buf);

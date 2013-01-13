@@ -9,6 +9,9 @@
 #define FATELF_UTILS 1
 #include "fatelf-utils.h"
 #include "fatelf-haiku.h"
+#include "ar.h"
+
+#include <ctype.h>
 
 static int fatelf_glue(const char *out, const char **bins, const int bincount)
 {
@@ -104,6 +107,135 @@ static int fatelf_glue(const char *out, const char **bins, const int bincount)
     return 0;  // success.
 } // fatelf_glue
 
+static void ar_dostuff(const char *fname) {
+    uint8_t magic[SARMAG];
+    char *string_table = NULL;
+    size_t string_table_size = 0;
+    int fd;
+
+    fd = xopen(fname, O_RDONLY, 0600);
+    xread(fname, fd, magic, SARMAG, true);
+
+    struct ar_hdr ar_hdr;
+    while (xread(fname, fd, &ar_hdr, sizeof(ar_hdr), 0) == sizeof(ar_hdr)) {
+        char *name;
+        long fsize;
+        int i;
+
+        // Save the current position for later seeking
+        off_t pos = xlseek(fname, fd, 0, SEEK_CUR);
+
+        // Extract the file size
+        sscanf(ar_hdr.ar_size, "%ld", &fsize);
+
+        // Extract the file name
+        name = xmalloc(sizeof(ar_hdr.ar_name) + 1);
+        strncpy(name, ar_hdr.ar_name, sizeof(ar_hdr.ar_name));
+        name[sizeof(ar_hdr.ar_name)] = '\0';
+
+        for (i = sizeof(ar_hdr.ar_name); i > 0; i--) {
+            char c = ar_hdr.ar_name[i - 1];
+
+            // Names are right-padded
+            if (c == ' ')
+                continue;
+
+            // GNU /-terminated name extension. We intentionally
+            // don't strip the name of the '/' and '//' special files.
+            if (c == '/' && i > 1 && name[0] != '/') {
+                // end of string found
+                name[i-1] = '\0';
+                break;
+            }
+
+            // Not in GNU format
+            name[i] = '\0';
+            break;
+        }
+
+        // Handle GNU/BSD long file name extensions
+        if (strncmp(name, AR_EFMT1, SAR_EFMT1) == 0) {
+            // File name stored in BSD format, with the actual
+            // name stored directly after the AR header.
+            long name_size;
+            sscanf(name + SAR_EFMT1, "%ld", &name_size);
+
+            free(name);
+            name = xmalloc(name_size+1);
+
+            xread(fname, fd, name, name_size, 1);
+            name[name_size] = '\0';
+
+            // Set to the actual file position and size
+            fsize -= name_size;
+            pos = xlseek(fname, fd, 0, SEEK_CUR);
+        } else if (name[0] == '/' && isdigit(name[1]) && string_table != NULL) {
+            // File name stored in GNU extension format
+            long table_offset;
+            size_t name_max = 0;
+            size_t name_len = 0;
+            char *table_entry;
+            char *src;
+
+            sscanf(name + 1, "%ld", &table_offset);
+
+            name_max = string_table_size - table_offset;
+            if (table_offset >= string_table_size)
+                xfail("ar archive '%s' entry '%s' references invalid GNU string table offset", fname, name);
+
+            free(name);
+
+            table_entry = string_table + table_offset;
+
+            // Compute the name length
+            for (src = table_entry; *src != '/' && name_len < name_max; src++)
+                name_len++;
+
+            name = xmalloc(name_len + 1);
+            strncpy(name, table_entry, name_len);
+            name[name_len] = '\0';
+        }
+
+        // Handle GNU's name table / symbol files.
+        if (strcmp(name, "//") == 0) {
+            /* GNU file name table */
+            if (string_table != NULL)
+                free(string_table);
+
+            string_table = xmalloc(fsize);
+            string_table_size = fsize;
+
+            xlseek(fname, fd, pos, SEEK_SET);
+            xread(fname, fd, string_table, fsize, 1);
+            continue;
+        } else if (strcmp(name, "/") == 0) {
+            // GNU symbol file
+            // TODO - anything necessary?
+        }
+
+        // Identify the file type
+        int binfmt = xidentify_binary(name, fd, pos);
+        switch (binfmt) {
+            case FATELF_FILE_ELF:
+                // TODO
+                fprintf(stderr, "ELF file '%s'\n", name);
+                break;
+            case FATELF_FILE_FAT:
+                // TODO
+                fprintf(stderr, "FAT file '%s'\n", name);
+                break;
+            default:
+                fprintf(stderr, "REG file '%s'\n", name);
+                // TODO
+                break;
+        }
+
+        xlseek(fname, fd, pos+fsize, SEEK_SET);
+    }
+
+    xclose(fname, fd);
+}
+
 static int fatelf_merge_files(const char *out, const char **files,
     const int filecount)
 {
@@ -127,9 +259,13 @@ static int fatelf_merge_files(const char *out, const char **files,
             break;
 
         case S_IFREG: {
-            int binfd = xopen(in, O_RDONLY, 0600);
-            int binfmt = xidentify_binary(in, binfd, 0);
+            int binfd;
+            int binfmt;
             int i;
+
+            binfd = xopen(in, O_RDONLY, 0600);
+            binfmt = xidentify_binary(in, binfd, 0);
+            xclose(in, binfd);
 
             // Determine if this is an ELF file
             if (binfmt == FATELF_FILE_ELF) {
@@ -137,6 +273,7 @@ static int fatelf_merge_files(const char *out, const char **files,
             } else if (binfmt == FATELF_FILE_AR) {
                 // TODO
                 fprintf(stderr, "Found an ar archive: %s\n", in);
+                ar_dostuff(in);
             } else if (binfmt == FATELF_FILE_FAT) {
                 xfail("Merging of FatELF files ('%s') is not supported", in);
             } else {
@@ -295,11 +432,12 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
                 size_t target_len;
                 relpath = ent->fts_path + strlen(dir);
                 relpath_len = strlen(relpath);
-                target_len = outlen + strlen(relpath) + 1;
-                target = xmalloc(target_len);
+                target_len = outlen + strlen(relpath);
+                target = xmalloc(target_len + 1);
 
                 strncpy(target, outdir, target_len);
                 strncat(target, relpath, target_len-outlen);
+                target[target_len] = '\0';
             }
 
             // Build up the list of matching input files from all input
@@ -309,11 +447,12 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
             for (diridx = 0; diridx < dircount; diridx++) {
                 // Generate the absolute path for the file
                 const char *dir = dirs[diridx];
-                size_t inpath_len = strlen(dir) + relpath_len + 1;
-                char *inpath = xmalloc(inpath_len);
+                size_t inpath_len = strlen(dir) + relpath_len;
+                char *inpath = xmalloc(inpath_len + 1);
 
                 strcpy(inpath, dir);
                 strcat(inpath, relpath);
+                inpath[inpath_len] = '\0';
 
                 // We can avoid duplicate merges if we know that the merge
                 // already occurred during an earlier FTS iteration.

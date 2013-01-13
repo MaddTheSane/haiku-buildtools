@@ -7,10 +7,13 @@
 // Standard AR definitions.
 
 #define ARMAG       "!<arch>\n"     /* ar file magic */
-#define SARMAG      8               /* ar file magic size */
+#define SARMAG      8
 
 #define AR_EFMT1    "#1/"           /* BSD extended filename format */
+#define SAR_EFMT1   3
+
 #define ARFMAG      "`\n"           /* AR entry terminator */
+#define SARFMAG     3
 
 struct ar_hdr {
     char ar_name[16];               /* name */

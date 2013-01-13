@@ -228,11 +228,13 @@ void xclose(const char *fname, const int fd)
 
 
 // xfail() on error.
-void xlseek(const char *fname, const int fd,
+off_t xlseek(const char *fname, const int fd,
             const off_t offset, const int whence)
 {
-    if (lseek(fd, offset, whence) == -1)
+    off_t ret = lseek(fd, offset, whence);
+    if (ret == -1)
         xfail("Failed to seek in '%s': %s", fname, strerror(errno));
+    return ret;
 } // xlseek
 
 // xfail() on error
@@ -642,19 +644,20 @@ void xverify_file_type_matches (const char *f1, const char *f2) {
 int xidentify_binary (const char *fname, const int fd, const off_t offset) {
     uint8_t magic[8];
     uint32_t fatelf_magic;
+    off_t nread;
 
     xlseek(fname, fd, offset, SEEK_SET);
-    xread(fname, fd, magic, 4, true);
-    if (memcmp(ELF_MAGIC, magic, 4) == 0)
+    nread = xread(fname, fd, magic, 4, false);
+    if (nread == 4 && memcmp(ELF_MAGIC, magic, 4) == 0)
         return FATELF_FILE_ELF;
 
     getui32(magic, &fatelf_magic);
-    if (fatelf_magic == FATELF_MAGIC)
+    if (nread == 4 && fatelf_magic == FATELF_MAGIC)
         return FATELF_FILE_FAT;
 
     xlseek(fname, fd, offset, SEEK_SET);
-    xread(fname, fd, magic, 8, true);
-    if (strncmp(ARMAG, (const char *) magic, SARMAG) == 0)
+    nread = xread(fname, fd, magic, SARMAG, false);
+    if (nread == SARMAG && strncmp(ARMAG, (const char *) magic, SARMAG) == 0)
         return FATELF_FILE_AR;
 
     return FATELF_FILE_UNKNOWN;
