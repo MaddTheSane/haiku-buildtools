@@ -607,6 +607,7 @@ uint64_t align_to_page(const uint64_t offset)
     return overflow ? (offset + (pagesize - overflow)) : offset;
 } // align_to_page
 
+
 const char *file_type_name (mode_t mode) {
     switch (mode & S_IFMT) {
         case S_IFIFO: return "fifo";
@@ -623,6 +624,17 @@ const char *file_type_name (mode_t mode) {
         default: return "unknown type";
     }
 } // file_type_name
+
+
+void xverify_file_type_matches (const char *f1, const char *f2) {
+    struct stat st1, st2;
+    xlstat(f1, &st1);
+    xlstat(f2, &st2);
+
+    // Check the file type
+    if ((st1.st_mode & S_IFMT) != (st2.st_mode & S_IFMT))
+        xfail("File '%s' is of a different type than '%s'", f1, f2);
+} // xverify_file_type_matches
 
 // !!! FIXME: these names/descs aren't set in stone.
 // List from: http://www.sco.com/developers/gabi/latest/ch4.eheader.html

@@ -104,16 +104,6 @@ static int fatelf_glue(const char *out, const char **bins, const int bincount)
     return 0;  // success.
 } // fatelf_glue
 
-static void xverify_file_matches (const char *f1, const char *f2) {
-    struct stat st1, st2;
-    xlstat(f1, &st1);
-    xlstat(f2, &st2);
-
-    // Check the file type
-    if ((st1.st_mode & S_IFMT) != (st2.st_mode & S_IFMT))
-        xfail("File '%s' is of a different type than '%s'", f1, f2);
-}
-
 static int fatelf_merge_files(const char *out, const char **files,
     const int filecount)
 {
@@ -129,7 +119,7 @@ static int fatelf_merge_files(const char *out, const char **files,
         case S_IFDIR:
             if (mkdir(out, 0700) == -1) {
                 if (errno == EEXIST)
-                    xverify_file_matches(in, out);
+                    xverify_file_type_matches(in, out);
                 else
                     xfail("Failed to create directory '%s': %s", out,
                         strerror(errno));
@@ -231,7 +221,7 @@ static int fatelf_merge_files(const char *out, const char **files,
             // Create the link
             if (symlink(linkname, out) == -1) {
                 if (errno == EEXIST) {
-                    xverify_file_matches(in, out);
+                    xverify_file_type_matches(in, out);
                 } else {
                     xfail("Failed to create symlink '%s': %s", out,
                           strerror(errno));
@@ -341,7 +331,7 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
                     filecount++;
 
                     if (filecount > 0)
-                        xverify_file_matches(inpath, files[0]);
+                        xverify_file_type_matches(inpath, files[0]);
                 }
             }
 

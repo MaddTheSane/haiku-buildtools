@@ -174,6 +174,9 @@ void xappend_junk(const char *fname, const int fd,
 // Return a descriptive name for the given mode_t's file type
 const char *file_type_name (mode_t mode);
 
+// Verify the file type of f1 matches f2
+void xverify_file_type_matches (const char *f1, const char *f2);
+
 // Align a value to the page size.
 uint64_t align_to_page(const uint64_t offset);
 
