@@ -259,18 +259,33 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
     FTS *tree;
     FTSENT *ent;
     size_t outlen;
-    int i;
+    int ftsidx, diridx;
 
     outlen = strlen(outdir);
 
-    // fts(3) requires a NULL-terminated array
-    for (i = 0; i < dircount; i++) {
-        const char *dir = dirs[i];
+    // Verify that all the input paths are directories
+    for (diridx = 0; diridx < dircount; diridx++) {
+        struct stat st;
+
+        xlstat(dirs[diridx], &st);
+        if (!S_ISDIR(st.st_mode))
+            xfail("Input path '%s' is not a directory.\n", dirs[diridx]);
+    }
+
+    // Iterate over the input directories. For each file found, we immediately
+    // search all other matching directories for a corresponding path, and then
+    // perform the merge on all matching files.
+    //
+    // If the destination file already  exists, this is not the first iterated
+    // directory, AND the path exists in a previously iterated directory, then
+    // we can assume a merge already took place and skip the file.
+    for (ftsidx = 0; ftsidx < dircount; ftsidx++) {
+        const char *dir = dirs[ftsidx];
         const char *path_argv[] = { dir, NULL };
 
         tree = xfts_open((char * const *) path_argv, FTS_NOCHDIR|FTS_PHYSICAL, NULL);
         while ((ent = xfts_read(tree)) != NULL) {
-            const char *files[dircount];
+            char *files[dircount];
             int filecount;
             const char *relpath;
             size_t relpath_len;
@@ -282,6 +297,9 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
             if (ent->fts_info == FTS_DP)
                 continue;
 
+            // Compute the relative path of the file, along with absolute path
+            // to the target directory. The relative path will be used to find
+            // matching files to merge from the other input directories.
             {
                 size_t target_len;
                 relpath = ent->fts_path + strlen(dir);
@@ -293,16 +311,31 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
                 strncat(target, relpath, target_len-outlen);
             }
 
-            // Build up the list of input files
+            // Build up the list of matching input files from all input
+            // directories
             filecount = 0;
-            for (j = 0; j < dircount; j++) {
-                const char *dir = dirs[j];
+            bool merge_done = false;
+            for (diridx = 0; diridx < dircount; diridx++) {
+                // Generate the absolute path for the file
+                const char *dir = dirs[diridx];
                 size_t inpath_len = strlen(dir) + relpath_len + 1;
                 char *inpath = xmalloc(inpath_len);
 
                 strcpy(inpath, dir);
                 strcat(inpath, relpath);
 
+                // We can avoid duplicate merges if we know that the merge
+                // already occurred during an earlier FTS iteration.
+                if (ftsidx > 0 && lstat(target, &st) == 0) {
+                    for (j = 0; j < filecount; j++) {
+                        if (lstat(files[j], &st) == 0)
+                            merge_done = true;
+                    }
+                }
+
+                // If the input path exists, add it to the input list and
+                // verify that it matches the file type of the other files
+                // already in the list
                 if (lstat(inpath, &st) == 0) {
                     files[filecount] = inpath;
                     filecount++;
@@ -314,7 +347,12 @@ static int fatelf_recursive_glue(const char *outdir, const char **dirs,
 
             assert(filecount > 0);
 
-            fatelf_merge_files(target, files, filecount);
+            if (!merge_done)
+                fatelf_merge_files(target, (const char **) files, filecount);
+
+            for (j = 0; j < filecount; j++)
+                free(files[j]);
+
             free(target);
         }
 

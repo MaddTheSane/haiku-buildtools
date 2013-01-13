@@ -17,6 +17,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <stdbool.h>
+
 #include <errno.h>
 #include <fts.h>
 
