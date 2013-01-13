@@ -112,8 +112,6 @@ static void xverify_file_matches (const char *f1, const char *f2) {
     // Check the file type
     if ((st1.st_mode & S_IFMT) != (st2.st_mode & S_IFMT))
         xfail("File '%s' is of a different type than '%s'", f1, f2);
-
-    // TODO - Verify the contents?
 }
 
 static int fatelf_merge_files(const char *out, const char **files,
