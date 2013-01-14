@@ -342,7 +342,27 @@ uint64_t xget_file_size(const char *fname, const int fd)
 // xfail() on error
 void xcopyfile_attr(const char *in, const char *out)
 {
-    // TODO - Copy permissions, ACLs, EAs.
+    struct stat st;
+    xlstat(in, &st);
+
+    // File permissions
+    if (!S_ISLNK(st.st_mode)) {
+        mode_t perms = (st.st_mode & ~S_IFMT);
+        if (chmod(out, perms) != 0)
+            xfail("Failed to set permissions %o on '%s'", perms, out);
+    }
+
+    // Ownership
+    if (lchown(out, st.st_uid, st.st_gid) != 0) {
+        if (errno == EPERM) {
+            fprintf(stderr, "Failed to set ownership on '%s': %s\n",
+                out, strerror(errno));
+        } else {
+            xfail("Failed to set ownership on '%s': %s", out, strerror(errno));
+        }
+    }
+
+    // TODO: ACLs, EAs
 }
 
 static uint8_t copybuf[256 * 1024];
