@@ -213,6 +213,100 @@ static bool ar_read_arch(const char *fname, FATELF_record *record) {
     return found_elf;
 }
 
+static void fatelf_glue_reg(const char *out, const char **files,
+    const int filecount)
+{
+    int binfd;
+    int binfmt;
+    int i;
+
+    const char *in;
+    struct stat st;
+
+    in = files[0];
+    xlstat(in, &st);
+
+    binfd = xopen(in, O_RDONLY, 0600);
+    binfmt = xidentify_binary(in, binfd, 0);
+    xclose(in, binfd);
+
+    // ELF file
+    if (binfmt == FATELF_FILE_ELF) {
+        fatelf_glue(out, files, filecount);
+        return;
+    }
+
+    // AR archive containing ELF data
+    if (binfmt == FATELF_FILE_AR && ar_read_arch(in, NULL)) {
+        fatelf_glue_ar(out, files, filecount);
+        return;
+    }
+
+    // FatELF binary
+    if (binfmt == FATELF_FILE_FAT)
+        xfail("Merging of FatELF files ('%s') is not supported", in);
+
+    // Regular file
+    size_t bufsize = 4096;
+    int fds[filecount];
+    ssize_t nread[filecount];
+    uint8_t **buffers = xmalloc(sizeof(void *) * filecount);
+    off_t nleft = st.st_size;
+    int outfd = xopen(out, O_WRONLY|O_CREAT|O_TRUNC, 0600);
+
+    for (i = 0; i < filecount; i++) {
+        buffers[i] = xmalloc(bufsize);
+        fds[i] = xopen(files[i], O_RDONLY, 0600);
+    }
+
+    // read in data from all input files, check for equality, and
+    // then write to the output
+    while (nleft > 0) {
+        for (i = 0; i < filecount; i++) {
+            if (fds[i] == -1)
+                continue;
+
+            nread[i] = xread(files[i], fds[i], buffers[i], bufsize, 0);
+
+            if (i > 0) {
+                /* Check for file equality */
+                if (nread[i] != nread[0]) {
+                    fprintf(stderr,
+                            "Files '%s' and '%s' differ in length\n",
+                            files[i], files[0]);
+                    xclose(files[i], fds[i]);
+                    fds[i] = -1;
+                    continue;
+                }
+
+                if (memcmp(buffers[0], buffers[i], nread[0]) != 0) {
+                    fprintf(stderr, "Files '%s' and '%s' differ\n",
+                            files[i], files[0]);
+                    xclose(files[i], fds[i]);
+                    fds[i] = -1;
+                    continue;
+                }
+
+            } else if (i == 0) {
+                /* Write to output */
+                xwrite(out, outfd, buffers[i], nread[i]);
+            }
+        }
+
+        nleft -= nread[0];
+    }
+
+    // Clean up
+    for (i = 0; i < filecount; i++) {
+        free(buffers[i]);
+        if (fds[i] != -1)
+            xclose(files[i], fds[i]);
+    }
+
+    free(buffers);
+    xclose(out, outfd);
+}
+
 static int fatelf_merge_files(const char *out, const char **files,
     const int filecount)
 {
@@ -236,78 +330,7 @@ static int fatelf_merge_files(const char *out, const char **files,
             break;
 
         case S_IFREG: {
-            int binfd;
-            int binfmt;
-            int i;
-
-            binfd = xopen(in, O_RDONLY, 0600);
-            binfmt = xidentify_binary(in, binfd, 0);
-            xclose(in, binfd);
-
-            // Determine if this is an ELF file
-            if (binfmt == FATELF_FILE_ELF) {
-                fatelf_glue(out, files, filecount);
-            } else if (binfmt == FATELF_FILE_AR && ar_read_arch(in, NULL)) {
-                fatelf_glue_ar(out, files, filecount);
-            } else if (binfmt == FATELF_FILE_FAT) {
-                xfail("Merging of FatELF files ('%s') is not supported", in);
-            } else {
-                size_t bufsize = 4096;
-                int fds[filecount];
-                ssize_t nread[filecount];
-                uint8_t **buffers = xmalloc(sizeof(void *) * filecount);
-                off_t nleft = st.st_size;
-                int outfd = xopen(out, O_WRONLY|O_CREAT|O_TRUNC, 0600);
-
-                for (i = 0; i < filecount; i++) {
-                    buffers[i] = xmalloc(bufsize);
-                    fds[i] = xopen(files[i], O_RDONLY, 0600);
-                }
-
-                // read in data from all input files, check for equality, and
-                // then write to the output
-                while (nleft > 0) {
-                    for (i = 0; i < filecount; i++) {
-                        if (fds[i] == -1)
-                            continue;
-
-                        nread[i] = xread(files[i], fds[i], buffers[i], bufsize, 0);
-
-                        if (i > 0) {
-                            /* Check for file equality */
-                            if (nread[i] != nread[0]) {
-                                fprintf(stderr, "Files '%s' and '%s' differ in length\n", files[i], files[0]);
-                                xclose(files[i], fds[i]);
-                                fds[i] = -1;
-                                continue;
-                            }
-
-                            if (memcmp(buffers[0], buffers[i], nread[0]) != 0) {
-                                fprintf(stderr, "Files '%s' and '%s' differ\n", files[i], files[0]);
-                                xclose(files[i], fds[i]);
-                                fds[i] = -1;
-                                continue;
-                            }
-
-                        } else if (i == 0) {
-                            /* Write to output */
-                            xwrite(out, outfd, buffers[i], nread[i]);
-                        }
-                    }
-
-                    nleft -= nread[0];
-                }
-
-                // Clean up
-                for (i = 0; i < filecount; i++) {
-                    free(buffers[i]);
-                    if (fds[i] != -1)
-                        xclose(files[i], fds[i]);
-                }
-
-                free(buffers);
-                xclose(out, outfd);
-            }
+            fatelf_glue_reg(out, files, filecount);
             break;
         }
 
@@ -350,7 +373,6 @@ static int fatelf_merge_files(const char *out, const char **files,
             break;
     }
 
-    // TODO : Verify this only once? Check the differences?
     xcopyfile_attr(in, out);
 
     return 0;
