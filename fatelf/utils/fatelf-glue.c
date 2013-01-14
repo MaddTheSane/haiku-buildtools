@@ -11,6 +11,8 @@
 #include "fatelf-haiku.h"
 #include "ar.h"
 
+static bool ar_read_arch(const char *fname, FATELF_record *record);
+
 static int fatelf_glue(const char *out, const char **bins, const int bincount)
 {
     int i = 0;
@@ -105,30 +107,110 @@ static int fatelf_glue(const char *out, const char **bins, const int bincount)
     return 0;  // success.
 } // fatelf_glue
 
-static void ar_dostuff(const char *fname) {
-    AR *ar = ar_open(fname);
-    AR_FILE *file;
+static int fatelf_glue_ar(const char *out, const char **ars, const int arcount)
+{
+    int i = 0;
+    const size_t struct_size = fatelf_header_size(arcount);
+    FATELF_header *header = (FATELF_header *) xmalloc(struct_size);
+    const int outfd = xopen(out, O_RDWR | O_CREAT | O_TRUNC, 0755);
+    uint64_t offset = FATELF_DISK_FORMAT_SIZE(arcount);
 
+    unlink_on_xfail = out;
+
+    if (arcount == 0)
+        xfail("Nothing to do.");
+    else if (arcount > 0xFF)
+        xfail("Too many binaries (max is 255).");
+
+    // pad out some bytes for the header we'll write at the end...
+    xwrite_zeros(out, outfd, (size_t) offset);
+
+    header->magic = FATELF_MAGIC;
+    header->version = FATELF_FORMAT_VERSION;
+    header->num_records = arcount;
+
+
+    for (i = 0; i < arcount; i++)
+    {
+        int j = 0;
+        const uint64_t binary_offset = align_to_page(offset);
+        const char *fname = ars[i];
+        const int fd = xopen(fname, O_RDONLY, 0755);
+        FATELF_record *record = &header->records[i];
+
+        if (!ar_read_arch(fname, record))
+            xfail("Archive '%s' contains no ELF images", fname);
+
+        record->offset = binary_offset;
+
+        // make sure we don't have a duplicate target.
+        for (j = 0; j < i; j++)
+        {
+            if (fatelf_record_matches(record, &header->records[j]))
+                xfail("'%s' and '%s' are for the same target.", ars[j], fname);
+        } // for
+
+        // append this binary to the final file, padded to page alignment.
+        xwrite_zeros(out, outfd, (size_t) (binary_offset - offset));
+        record->size = xcopyfile(fname, fd, out, outfd);
+
+        offset = binary_offset + record->size;
+
+        // done with this binary!
+        xclose(fname, fd);
+    } // for
+
+    // Write the actual FatELF header now...
+    xwrite_fatelf_header(out, outfd, header);
+
+    xclose(out, outfd);
+    free(header);
+
+    unlink_on_xfail = NULL;
+
+    return 0;  // success.
+} // fatelf_glue_ar
+
+// Determine the architecture of object files in ar archive. Returns true
+// if ELF files were found, false otherwise. Calls xfail() if an error
+// occurs. record argument may be NULL.
+static bool ar_read_arch(const char *fname, FATELF_record *record) {
+    AR *ar;
+    AR_FILE *file;
+    FATELF_record first_record;
+    bool found_elf = false;
+
+    ar = ar_open(fname);
     while ((file = ar_read(ar)) != NULL) {
         // Identify the file type
-        int binfmt = xidentify_binary(file->name, ar_fd(ar), file->offset);
+        int binfmt = xidentify_binary(fname, ar_fd(ar), file->offset);
         switch (binfmt) {
             case FATELF_FILE_ELF:
-                // TODO
-                fprintf(stderr, "ELF file '%s'\n", file->name);
+                if (found_elf) {
+                    FATELF_record nrec;
+                    xread_elf_header(fname, ar_fd(ar), file->offset, &nrec);
+                    if (!fatelf_record_matches(&first_record, &nrec))
+                        xfail("%s(%s) does not match archives' other ELF objects' architecture.", fname, file->name);
+                } else {
+                    found_elf = true;
+                    xread_elf_header(fname, ar_fd(ar), file->offset, &first_record);
+                }
                 break;
             case FATELF_FILE_FAT:
-                // TODO
-                fprintf(stderr, "FAT file '%s'\n", file->name);
+                xfail("Merging of FatELF files ('%s') is not supported", fname);
                 break;
             default:
-                fprintf(stderr, "REG file '%s'\n", file->name);
-                // TODO
+                // Nothing to do
                 break;
         }
     }
 
     ar_close(ar);
+
+    if (record != NULL)
+        *record = first_record;
+
+    return found_elf;
 }
 
 static int fatelf_merge_files(const char *out, const char **files,
@@ -165,10 +247,8 @@ static int fatelf_merge_files(const char *out, const char **files,
             // Determine if this is an ELF file
             if (binfmt == FATELF_FILE_ELF) {
                 fatelf_glue(out, files, filecount);
-            } else if (binfmt == FATELF_FILE_AR) {
-                // TODO
-                fprintf(stderr, "Found an ar archive: %s\n", in);
-                ar_dostuff(in);
+            } else if (binfmt == FATELF_FILE_AR && ar_read_arch(in, NULL)) {
+                fatelf_glue_ar(out, files, filecount);
             } else if (binfmt == FATELF_FILE_FAT) {
                 xfail("Merging of FatELF files ('%s') is not supported", in);
             } else {
@@ -398,7 +478,9 @@ int main(int argc, const char **argv)
 {
     const char *argv0 = argv[0];
     int rflag = 0;
+    int binfmt;
     int ch;
+    int fd;
 
     xfatelf_init(argc, argv);
     while ((ch = getopt(argc, (char **) argv, "r"))  != -1) {
@@ -418,8 +500,15 @@ int main(int argc, const char **argv)
     if (argc < 2)
         xusage(argv0);
 
-    if (rflag) {
+    if (rflag)
         return fatelf_recursive_glue(argv[0], &argv[1], argc - 1);
+
+    fd = xopen(argv[1], O_RDONLY, 0600);
+    binfmt = xidentify_binary(argv[1], fd, 0);
+    xclose(argv[1], fd);
+
+    if (binfmt == FATELF_FILE_AR) {
+        return fatelf_glue_ar(argv[0], &argv[1], argc - 1);
     } else {
         return fatelf_glue(argv[0], &argv[1], argc - 1);
     }
