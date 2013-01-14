@@ -178,9 +178,6 @@ AR_FILE *ar_read (AR *ar) {
 
         xlseek(ar->fname, ar->fd, ar_entry->offset, SEEK_SET);
         xread(ar->fname, ar->fd, ar->string_table, ar_entry->size, 1);
-    } else if (strcmp(ar_entry->name, "/") == 0) {
-        // GNU symbol file
-        // TODO - anything necessary?
     }
 
     return ar_entry;
