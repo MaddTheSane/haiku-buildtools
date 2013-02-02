@@ -462,9 +462,8 @@ static void clean_output_files (arg_table *output_files) {
 }
 
 /* Execute a command */
-static bool exec_command (arg_table *args) {
+static bool exec_command (arg_table *args, int *stat_loc) {
     int ret;
-    int stat_loc;
     pid_t pid;
 
     pid = fork();
@@ -473,7 +472,7 @@ static bool exec_command (arg_table *args) {
         xfail("exec failed: %s", strerror(errno));
     }
 
-    while ((ret = wait4(pid, &stat_loc, 0, NULL)) == -1) {
+    while ((ret = wait4(pid, stat_loc, 0, NULL)) == -1) {
         if (errno != EINTR)
             break;
     }
@@ -494,6 +493,8 @@ int main(int argc, const char **argv)
     arg_table fatelf_glue_args;
     arg_table temp_output_args;
     char *fatelf_glue_path;
+    bool all_compiles_succeeded;
+    int stat_loc;
 
     compiler_set compilers;
     int i;
@@ -609,6 +610,7 @@ int main(int argc, const char **argv)
     }
 
     /* Perform initial compilation */
+    all_compiles_succeeded = true;
     for (i = 0; i < compilers.count; i++) {
         compiler *c = compilers.compilers[i];
         char *temp_out = NULL;
@@ -638,9 +640,14 @@ int main(int argc, const char **argv)
             xfail("Could not find compiler for %s in %s",c->fat_arch, prefix);
         }
 
-        if (!exec_command(&c->args)) {
+        if (!exec_command(&c->args, &stat_loc)) {
             clean_output_files(&temp_output_args);
             return 1;
+        }
+
+        if (stat_loc != 0) {
+            clean_output_files(&temp_output_args);
+            all_compiles_succeeded = false;
         }
 
         if (temp_out != NULL)
@@ -648,13 +655,13 @@ int main(int argc, const char **argv)
     }
 
     /* Glue the results */
-    if (compilers.count > 1) {
+    if (compilers.count > 1 && all_compiles_succeeded) {
         append_argument(&fatelf_glue_args, fatelf_glue_path);
         append_argument(&fatelf_glue_args, output_file);
         for (i = 0; i < temp_output_args.argc; i++)
             append_argument(&fatelf_glue_args, temp_output_args.argv[i]);
 
-        if (!exec_command(&fatelf_glue_args)) {
+        if (!exec_command(&fatelf_glue_args, &stat_loc)) {
             clean_output_files(&temp_output_args);
             return 1;
         }
