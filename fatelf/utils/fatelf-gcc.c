@@ -61,6 +61,11 @@ typedef struct cc_flag {
 
     /* May only be used with -Xarch_* */
     const bool xarch_only;
+
+    /* If used, will result in output going to stdout by default. This is
+     * inherently incompatible with fat building. Currently -E is the only
+     * known example of this. The driver must be aware of this argument. */
+    const bool enables_stdout_output;
 } cc_flag;
 
 typedef struct arch_cc_entry {
@@ -84,58 +89,58 @@ typedef struct arch_cc_march_entry {
 // this occurring is low, and we have the advantage of being able to
 // update GCC and fatelf utils in lockstep.
 static const cc_flag cc_flags[] = {
-    /*  opt         accepts_arg driver_flag driver_only fat_nocompat xarch_only */
+    /*  opt         accepts_arg driver_flag driver_only fat_nocompat xarch_only enables_stdout */
 
     // arguments the driver must be aware of
-    {   "-o",       true,       true,       true,       false,       false   },
-    {   "-c",       false,      false,      false,      false,       false   },
+    {   "-o",       true,       true,       true,       false,       false,     false },
+    {   "-c",       false,      false,      false,      false,       false,     false },
 
     // driver-specific arguments
-    {   "-arch",    true,       true,       true,       false,       false   },
+    {   "-arch",    true,       true,       true,       false,       false,     false },
 
     // fat-incompatible arguments
-    {   "-S",       false,      false,      false,      true,        false    },
-    {   "-E",       false,      false,      false,      true,        false    },
-    {   "-MD",      false,      false,      false,      true,        false    },
-    {   "-MMD",     false,      false,      false,      true,        false    },
-    {   "-m32",     false,      false,      false,      true,        false    },
-    {   "-m64",     false,      false,      false,      true,        false    },
-    {   "-mcpu=",   false,      false,      false,      false,       true     },
-    {   "-march=",  false,      false,      false,      false,       true     },
+    {   "-S",       false,      false,      false,      true,        false,     false  },
+    {   "-E",       false,      false,      false,      true,        false,     true   },
+    {   "-MD",      false,      false,      false,      true,        false,     false  },
+    {   "-MMD",     false,      false,      false,      true,        false,     false  },
+    {   "-m32",     false,      false,      false,      true,        false,     false  },
+    {   "-m64",     false,      false,      false,      true,        false,     false  },
+    {   "-mcpu=",   false,      false,      false,      false,       true,      false  },
+    {   "-march=",  false,      false,      false,      false,       true,      false  },
 
     // multi-argument options
-    {   "-D",       true,       false,      false,      false,       false   },
-    {   "-U",       true,       false,      false,      false,       false   },
-    {   "-e",       true,       false,      false,      false,       false   },
-    {   "-T",       true,       false,      false,      false,       false   },
-    {   "-u",       true,       false,      false,      false,       false   },
-    {   "-I",       true,       false,      false,      false,       false   },
-    {   "-m",       true,       false,      false,      false,       false   },
-    {   "-x",       true,       false,      false,      false,       false   },
-    {   "-L",       true,       false,      false,      false,       false   },
-    {   "-A",       true,       false,      false,      false,       false   },
-    {   "-V",       true,       false,      false,      false,       false   },
+    {   "-D",       true,       false,      false,      false,       false,     false  },
+    {   "-U",       true,       false,      false,      false,       false,     false  },
+    {   "-e",       true,       false,      false,      false,       false,     false  },
+    {   "-T",       true,       false,      false,      false,       false,     false  },
+    {   "-u",       true,       false,      false,      false,       false,     false  },
+    {   "-I",       true,       false,      false,      false,       false,     false  },
+    {   "-m",       true,       false,      false,      false,       false,     false  },
+    {   "-x",       true,       false,      false,      false,       false,     false  },
+    {   "-L",       true,       false,      false,      false,       false,     false  },
+    {   "-A",       true,       false,      false,      false,       false,     false  },
+    {   "-V",       true,       false,      false,      false,       false,     false  },
 
-    {   "-Tdata",   true,       false,      false,      false,       false   },
-    {   "-Ttext",   true,       false,      false,      false,       false   },
-    {   "-Tbss",    true,       false,      false,      false,       false   },
-    {   "-include", true,       false,      false,      false,       false   },
-    {   "-imacros", true,       false,      false,      false,       false   },
+    {   "-Tdata",   true,       false,      false,      false,       false,     false  },
+    {   "-Ttext",   true,       false,      false,      false,       false,     false  },
+    {   "-Tbss",    true,       false,      false,      false,       false,     false  },
+    {   "-include", true,       false,      false,      false,       false,     false  },
+    {   "-imacros", true,       false,      false,      false,       false,     false  },
     {   "-aux-info",
-                    true,       false,      false,      false,       false   },
+                    true,       false,      false,      false,       false,     false  },
     {   "-idirafter",
-                    true,       false,      false,      false,       false   },
-    {   "-iprefix", true,       false,      false,      false,       false   },
+                    true,       false,      false,      false,       false,     false  },
+    {   "-iprefix", true,       false,      false,      false,       false,     false  },
     {   "-iwithprefix",
-                    true,       false,      false,      false,       false   },
+                    true,       false,      false,      false,       false,     false  },
     {   "-iwithprefixbefore",
-                    true,       false,      false,      false,       false   },
+                    true,       false,      false,      false,       false,     false  },
     {   "-iwithprefix",
-                    true,       false,      false,      false,       false   },
-    {   "-iquote",  true,       false,      false,      false,       false   },
-    {   "-isystem", true,       false,      false,      false,       false   },
-    {   "-isysroot",true,       false,      false,      false,       false   },
-    {   "-specs",   true,       false,      false,      false,       false   },
+                    true,       false,      false,      false,       false,     false  },
+    {   "-iquote",  true,       false,      false,      false,       false,     false  },
+    {   "-isystem", true,       false,      false,      false,       false,     false  },
+    {   "-isysroot",true,       false,      false,      false,       false,     false  },
+    {   "-specs",   true,       false,      false,      false,       false,     false  },
 };
 
 // Map -arch flags to compiler architecture names.
@@ -186,7 +191,8 @@ static const arch_cc_march_entry arch_cc_march_map[] = {
 };
 
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
-        arg_table *nofat_args, compiler_set *compilers, int depth);
+        arg_table *nofat_args, compiler_set *compilers, bool *stdout_output,
+        int depth);
 
 /* Look up the given option in the cc_flags table. */
 static const cc_flag *find_flag (const char *opt)
@@ -348,7 +354,8 @@ static void append_compiler_argument (compiler_set *compilers,
 /* Parse an gcc(1) @file, which contains command line arguments, separated
  * by whitespace. */
 static void parse_argument_file (const char *fname, arg_table *driver_args,
-        arg_table *nofat_args, compiler_set *compilers, int depth)
+        arg_table *nofat_args, compiler_set *compilers, bool *stdout_output,
+        int depth)
 {
     arg_table file_args;
     char optbuf[8192];
@@ -385,7 +392,8 @@ static void parse_argument_file (const char *fname, arg_table *driver_args,
     } while (1);
 
     /* Recursively parse the input arguments */
-    parse_arguments(&file_args, driver_args, nofat_args, compilers, depth);
+    parse_arguments(&file_args, driver_args, nofat_args, compilers,
+        stdout_output, depth);
 
     /* Clean up */
     xclose(fname, fd);
@@ -395,10 +403,12 @@ static void parse_argument_file (const char *fname, arg_table *driver_args,
 
 /* Parse all arguments from input_args, populating compilers and fat_args. */
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
-        arg_table *nofat_args, compiler_set *compilers, int depth)
+        arg_table *nofat_args, compiler_set *compilers, bool *stdout_output,
+        int depth)
 {
     int i;
 
+    *stdout_output = false;
     for (i = 0; i < input_args->argc; i++) {
         const char *arg = input_args->argv[i];
 
@@ -420,8 +430,13 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
 
         // Handle @file
         if (arg[0] == '@' && arg[1] != '\0') {
+            bool stdout_result;
             parse_argument_file(arg+1, driver_args, nofat_args, compilers,
-                    depth + 1);
+                &stdout_result, depth + 1);
+
+            if (stdout_result)
+                *stdout_output = true;
+
             continue;
         }
 
@@ -434,6 +449,9 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
 
             if (!flag->driver_only)
                 append_compiler_argument(compilers, arg, arch_only);
+
+            if (flag->enables_stdout_output)
+                *stdout_output = true;
 
             if (flag->fat_nocompat)
                 append_argument(nofat_args, arg);
@@ -605,11 +623,13 @@ int main(int argc, const char **argv)
         xfail("Could not find %s", fatelf_glue_cmd);
 
     /* Parse all input arguments */
-    parse_arguments(&input_args, &driver_args, &nofat_args, &compilers, 0);
+    bool use_stdout;
+    parse_arguments(&input_args, &driver_args, &nofat_args, &compilers,
+        &use_stdout, 0);
 
     /* Handle any driver-specific arguments. Note that the existence
      * of required flags has already been verified. */
-    const char *output_file = default_output;
+    const char *output_file = NULL;
     for (i = 0; i < driver_args.argc; i++) {
         const char *arg = driver_args.argv[i];
 
@@ -619,8 +639,16 @@ int main(int argc, const char **argv)
         } else if (strcmp(arg, "-o") == 0) {
             i++;
             output_file = driver_args.argv[i];
+            use_stdout = false;
         }
     }
+
+    /* Set a default output file if none was configured above */
+    if (output_file == NULL && use_stdout)
+        output_file = "-";
+    else if (output_file == NULL)
+        output_file = default_output;
+
 
 
     /* Report any arguments incompatible with multi-arch execution */
@@ -630,6 +658,12 @@ int main(int argc, const char **argv)
             fprintf(stderr, "%s is not supported with multiple -arch flags\n",
                     arg);
         }
+        exit(1);
+    }
+
+    if (compilers.count > 1 && use_stdout) {
+        fprintf(stderr,
+            "Writing to stdout is not supported with multiple -arch flags\n");
         exit(1);
     }
 
@@ -644,8 +678,8 @@ int main(int argc, const char **argv)
         append_compiler_march_flags(compilers.compilers[i]);
 
     /* Generate the output file template */
-    char *output_template;
-    {
+    char *output_template = NULL;
+    if (!use_stdout) {
         static const char temp_suffix[] = ".XXXXXX";
         char *output_dir = strdup(output_file);
         char *fname = NULL;
