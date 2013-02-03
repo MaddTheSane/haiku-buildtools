@@ -53,7 +53,8 @@ typedef struct arch_cc_entry {
 
 typedef struct arch_cc_march_entry {
     const char *arch_flag;
-    const char *cc_flag[3];
+    const char *cc_data_model;
+    const char *cc_march_flag[3];
 } arch_cc_march_entry;
 
 // This table is used to perform interpretation of the gcc arguments
@@ -139,30 +140,30 @@ static const arch_cc_entry arch_cc_map[] = {
     },
 };
 
-// Map -arch flags to compiler -march= flags
+// Map -arch flags to compiler -m(32|64) and (-march=|-mcpu=) flags
 static const arch_cc_march_entry arch_cc_march_map[] = {
-    { "i386",       {"-m32", NULL }},
-    { "i486",       {"-m32", "-march=i486", NULL}},
-    { "i586",       {"-m32", "-march=i586", NULL}},
-    { "i686",       {"-m32", "-march=i686", NULL}},
-    { "x86_64",     {"-m64", NULL }},
+    { "i386",       "-m32", { NULL } },
+    { "i486",       "-m32", { "-march=i486", NULL} },
+    { "i586",       "-m32", { "-march=i586", NULL} },
+    { "i686",       "-m32", { "-march=i686", NULL} },
+    { "x86_64",     "-m64", { NULL } },
 
-    { "arm",        {"-march=armv4t", NULL }},
-    { "armv4t",     {"-march=armv4t", NULL }},
-    { "armv5",      {"-march=armv5tej", NULL }},
-    { "xscale",     {"-march=xscale", NULL }},
-    { "armv6",      {"-march=armv6k", NULL}},
-    { "armv7",      {"-march=armv7a", NULL }},
+    { "arm",        NULL,   { "-march=armv4t", NULL } },
+    { "armv4t",     NULL,   { "-march=armv4t", NULL } },
+    { "armv5",      NULL,   { "-march=armv5tej", NULL } },
+    { "xscale",     NULL,   { "-march=xscale", NULL } },
+    { "armv6",      NULL,   { "-march=armv6k", NULL } },
+    { "armv7",      NULL,   { "-march=armv7a", NULL } },
 
-    { "ppc601",     {"-m32", "-mcpu=601", NULL}},
-    { "ppc603",     {"-m32", "-mcpu=603", NULL}},
-    { "ppc604",     {"-m32", "-mcpu=604", NULL}},
-    { "ppc604e",    {"-m32", "-mcpu=604e", NULL}},
-    { "ppc750",     {"-m32", "-mcpu=750", NULL}},
-    { "ppc7400",    {"-m32", "-mcpu=7400", NULL}},
-    { "ppc7450",    {"-m32", "-mcpu=7450", NULL}},
-    { "ppc970",     {"-m32", "-mcpu=970", NULL}},
-    { "ppc64",      {"-m64", NULL}},
+    { "ppc601",     "-m32", { "-mcpu=601", NULL } },
+    { "ppc603",     "-m32", { "-mcpu=603", NULL } },
+    { "ppc604",     "-m32", { "-mcpu=604", NULL } },
+    { "ppc604e",    "-m32", { "-mcpu=604e", NULL } },
+    { "ppc750",     "-m32", { "-mcpu=750", NULL } },
+    { "ppc7400",    "-m32", { "-mcpu=7400", NULL } },
+    { "ppc7450",    "-m32", { "-mcpu=7450", NULL } },
+    { "ppc970",     "-m32", { "-mcpu=970", NULL } },
+    { "ppc64",      "-m64", { NULL} },
 };
 
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
@@ -237,23 +238,49 @@ static compiler *append_compiler (compiler_set *compilers, const char *arch) {
     for (i = 0; i < compilers->default_args.argc; i++)
         append_argument(&c->args, compilers->default_args.argv[i]);
 
-    // Add any -march flag
-    for (i = 0; i < sizeof(arch_cc_march_map) / sizeof(arch_cc_march_map[0]); i++) {
-        const arch_cc_march_entry *entry = &arch_cc_march_map[i];
-        if (strcmp(arch, entry->arch_flag) == 0) {
-            int j;
-            for (j = 0; entry->cc_flag[j] != NULL; j++)
-                append_argument(&c->args, entry->cc_flag[j]);
-            break;
-        }
-    }
-
     // Append to the compiler set
     compilers->count++;
     compilers->compilers = xrealloc(compilers->compilers, compilers->count * sizeof(*c));
     compilers->compilers[compilers->count - 1] = c;
 
     return c;
+}
+
+/* Given a fully populated compiler instance, scan the existing flags and populate
+ * the arch flags accordingly. */
+static void append_compiler_march_flags (compiler *compiler) {
+    int i;
+    bool has_data_model = false;
+    bool has_march = false;
+
+    /* Determine the flags that have already been set; we don't want to override
+     * these */
+    for (i = 0; i < compiler->args.argc; i++) {
+        const char *arg = compiler->args.argv[i];
+        if (strcmp(arg, "-m32") == 0 || strcmp(arg, "-m64") == 0) {
+            has_data_model = true;
+        } else if (strstr(arg, "-march=") == arg || strstr(arg, "-mcpu=") == 0) {
+            has_march = true;
+        }
+    }
+
+    // Add any -m(32|64) and -march flags
+    for (i = 0; i < sizeof(arch_cc_march_map) / sizeof(arch_cc_march_map[0]); i++) {
+        const arch_cc_march_entry *entry = &arch_cc_march_map[i];
+        if (strcmp(compiler->fat_arch, entry->arch_flag) != 0)
+            continue;
+
+        if (!has_data_model && entry->cc_data_model != NULL)
+            append_argument(&compiler->args, entry->cc_data_model);
+
+        if (!has_march) {
+            int j;
+            for (j = 0; entry->cc_march_flag[j] != NULL; j++)
+                append_argument(&compiler->args, entry->cc_march_flag[j]);
+        }
+
+        break;
+    }
 }
 
 /* Append a compiler argument to the compiler set. If arch_only is non-NULL,
@@ -574,6 +601,10 @@ int main(int argc, const char **argv)
         const fatelf_machine_info *machine = get_machine_from_host();
         append_compiler(&compilers, machine->name);
     }
+
+    /* Apply march flags */
+    for (i = 0; i < compilers.count; i++)
+        append_compiler_march_flags(compilers.compilers[i]);
 
     /* Generate the output file template */
     char *output_template;
