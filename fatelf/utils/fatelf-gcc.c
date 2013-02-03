@@ -135,7 +135,7 @@ static const cc_flag cc_flags[] = {
     {   "-iquote",  true,       false,      false,      false,       false   },
     {   "-isystem", true,       false,      false,      false,       false   },
     {   "-isysroot",true,       false,      false,      false,       false   },
-
+    {   "-specs",   true,       false,      false,      false,       false   },
 };
 
 // Map -arch flags to compiler architecture names.
