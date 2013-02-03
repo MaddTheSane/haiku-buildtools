@@ -714,10 +714,14 @@ int main(int argc, const char **argv)
             return 1;
         }
 
-        if (WEXITSTATUS(stat_loc) != 0) {
+        if (WIFEXITED(stat_loc) && WEXITSTATUS(stat_loc) != 0) {
             clean_output_files(&temp_output_args);
             all_compiles_succeeded = false;
             exit_code = WEXITSTATUS(stat_loc);
+        } else if (WIFSIGNALED(stat_loc)) {
+            clean_output_files(&temp_output_args);
+            all_compiles_succeeded = false;
+            exit_code = 1;
         }
 
         if (temp_out != NULL)
