@@ -523,6 +523,13 @@ static bool exec_command (arg_table *args, int *stat_loc) {
     int ret;
     pid_t pid;
 
+#if DEBUG_EXEC
+    int i;
+    for (i = 0; i < args->argc; i++)
+        fprintf(stderr, "%s ", args->argv[i]);
+    fprintf(stderr, "\n");
+#endif
+
     pid = fork();
     if (pid == 0) {
         execv(args->argv[0], args->argv);
