@@ -33,17 +33,34 @@ typedef struct compiler {
 } compiler;
 
 typedef struct compiler_set {
+    /* Default arguments applied to all newly added compilers */
     arg_table default_args;
+
+    /* All compilers */
     compiler **compilers;
+
+    /* Number of compilers */
     size_t count;
 } compiler_set;
 
 typedef struct cc_flag {
+    /* Name of flag */
     const char *opt;
+
+    /* Flag accepts an argument */
     const bool accepts_arg;
+
+    /* Flag is interpreted by the driver */
     const bool driver_flag;
+
+    /* Flag is not passed to the compiler */
     const bool driver_only;
+
+    /* May not be used when compiling fat */
     const bool fat_nocompat;
+
+    /* May only be used with -Xarch_* */
+    const bool xarch_only;
 } cc_flag;
 
 typedef struct arch_cc_entry {
@@ -67,55 +84,57 @@ typedef struct arch_cc_march_entry {
 // this occurring is low, and we have the advantage of being able to
 // update GCC and fatelf utils in lockstep.
 static const cc_flag cc_flags[] = {
-    /*  opt         accepts_arg driver_flag driver_only fat_nocompat */
+    /*  opt         accepts_arg driver_flag driver_only fat_nocompat xarch_only */
 
     // arguments the driver must be aware of
-    {   "-o",       true,       true,       true,       false   },
-    {   "-c",       false,      false,      false,      false   },
+    {   "-o",       true,       true,       true,       false,       false   },
+    {   "-c",       false,      false,      false,      false,       false   },
 
     // driver-specific arguments
-    {   "-arch",    true,       true,       true,       false   },
+    {   "-arch",    true,       true,       true,       false,       false   },
 
     // fat-incompatible arguments
-    {   "-S",       false,      false,      false,      true    },
-    {   "-E",       false,      false,      false,      true    },
-    {   "-MD",      false,      false,      false,      true    },
-    {   "-MMD",     false,      false,      false,      true    },
-    {   "-m32",     false,      false,      false,      true    },
-    {   "-m64",     false,      false,      false,      true    },
+    {   "-S",       false,      false,      false,      true,        false    },
+    {   "-E",       false,      false,      false,      true,        false    },
+    {   "-MD",      false,      false,      false,      true,        false    },
+    {   "-MMD",     false,      false,      false,      true,        false    },
+    {   "-m32",     false,      false,      false,      true,        false    },
+    {   "-m64",     false,      false,      false,      true,        false    },
+    {   "-mcpu=",   false,      false,      false,      false,       true     },
+    {   "-march=",  false,      false,      false,      false,       true     },
 
     // multi-argument options
-    {   "-D",       true,       false,      false,      false   },
-    {   "-U",       true,       false,      false,      false   },
-    {   "-e",       true,       false,      false,      false   },
-    {   "-T",       true,       false,      false,      false   },
-    {   "-u",       true,       false,      false,      false   },
-    {   "-I",       true,       false,      false,      false   },
-    {   "-m",       true,       false,      false,      false   },
-    {   "-x",       true,       false,      false,      false   },
-    {   "-L",       true,       false,      false,      false   },
-    {   "-A",       true,       false,      false,      false   },
-    {   "-V",       true,       false,      false,      false   },
+    {   "-D",       true,       false,      false,      false,       false   },
+    {   "-U",       true,       false,      false,      false,       false   },
+    {   "-e",       true,       false,      false,      false,       false   },
+    {   "-T",       true,       false,      false,      false,       false   },
+    {   "-u",       true,       false,      false,      false,       false   },
+    {   "-I",       true,       false,      false,      false,       false   },
+    {   "-m",       true,       false,      false,      false,       false   },
+    {   "-x",       true,       false,      false,      false,       false   },
+    {   "-L",       true,       false,      false,      false,       false   },
+    {   "-A",       true,       false,      false,      false,       false   },
+    {   "-V",       true,       false,      false,      false,       false   },
 
-    {   "-Tdata",   true,       false,      false,      false   },
-    {   "-Ttext",   true,       false,      false,      false   },
-    {   "-Tbss",    true,       false,      false,      false   },
-    {   "-include", true,       false,      false,      false   },
-    {   "-imacros", true,       false,      false,      false   },
+    {   "-Tdata",   true,       false,      false,      false,       false   },
+    {   "-Ttext",   true,       false,      false,      false,       false   },
+    {   "-Tbss",    true,       false,      false,      false,       false   },
+    {   "-include", true,       false,      false,      false,       false   },
+    {   "-imacros", true,       false,      false,      false,       false   },
     {   "-aux-info",
-                    true,       false,      false,      false   },
+                    true,       false,      false,      false,       false   },
     {   "-idirafter",
-                    true,       false,      false,      false   },
-    {   "-iprefix", true,       false,      false,      false   },
+                    true,       false,      false,      false,       false   },
+    {   "-iprefix", true,       false,      false,      false,       false   },
     {   "-iwithprefix",
-                    true,       false,      false,      false   },
+                    true,       false,      false,      false,       false   },
     {   "-iwithprefixbefore",
-                    true,       false,      false,      false   },
+                    true,       false,      false,      false,       false   },
     {   "-iwithprefix",
-                    true,       false,      false,      false   },
-    {   "-iquote",  true,       false,      false,      false   },
-    {   "-isystem", true,       false,      false,      false   },
-    {   "-isysroot",true,       false,      false,      false   },
+                    true,       false,      false,      false,       false   },
+    {   "-iquote",  true,       false,      false,      false,       false   },
+    {   "-isystem", true,       false,      false,      false,       false   },
+    {   "-isysroot",true,       false,      false,      false,       false   },
 
 };
 
@@ -176,8 +195,16 @@ static const cc_flag *find_flag (const char *opt)
 
     for (i = 0; i < sizeof(cc_flags) / sizeof(cc_flags[0]); i++) {
         const cc_flag *flag = &cc_flags[i];
-        if (strcmp(opt, flag->opt) == 0)
+        size_t flen = strlen(flag->opt);
+
+        /* Special case flags that use '=' to combine the flag and
+         * argument. */
+        if (flen > 0 && flag->opt[flen-1] == '=') {
+            if  (strncmp(opt, flag->opt, flen) == 0)
+                return flag;
+        } else if (strcmp(opt, flag->opt) == 0) {
             return flag;
+        }
     }
 
     return NULL;
@@ -409,6 +436,9 @@ static void parse_arguments (arg_table *input_args, arg_table *driver_args,
                 append_compiler_argument(compilers, arg, arch_only);
 
             if (flag->fat_nocompat)
+                append_argument(nofat_args, arg);
+
+            if (flag->xarch_only && arch_only == NULL)
                 append_argument(nofat_args, arg);
 
             if (flag->accepts_arg) {
