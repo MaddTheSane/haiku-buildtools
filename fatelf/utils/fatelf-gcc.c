@@ -551,7 +551,7 @@ int main(int argc, const char **argv)
     arg_table temp_output_args;
     char *fatelf_glue_path;
     bool all_compiles_succeeded;
-    int stat_loc;
+    int stat_loc, exit_code;
 
     compiler_set compilers;
     int i;
@@ -672,6 +672,7 @@ int main(int argc, const char **argv)
 
     /* Perform initial compilation */
     all_compiles_succeeded = true;
+    exit_code = 0;
     for (i = 0; i < compilers.count; i++) {
         compiler *c = compilers.compilers[i];
         char *temp_out = NULL;
@@ -706,9 +707,10 @@ int main(int argc, const char **argv)
             return 1;
         }
 
-        if (stat_loc != 0) {
+        if (WEXITSTATUS(stat_loc) != 0) {
             clean_output_files(&temp_output_args);
             all_compiles_succeeded = false;
+            exit_code = WEXITSTATUS(stat_loc);
         }
 
         if (temp_out != NULL)
@@ -747,5 +749,7 @@ int main(int argc, const char **argv)
     free(output_template);
     free(prefix);
     free(cmdname);
-    return 0;
+
+    /* Return the result of the last failed compilation (or 0). */
+    return exit_code;
 }
