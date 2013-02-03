@@ -44,6 +44,7 @@ typedef struct cc_flag {
     const bool driver_flag;
     const bool driver_only;
     const bool fat_nocompat;
+    const bool march_nocompat;
 } cc_flag;
 
 typedef struct arch_cc_entry {
@@ -66,55 +67,57 @@ typedef struct arch_cc_march_entry {
 // this occurring is low, and we have the advantage of being able to
 // update GCC and fatelf utils in lockstep.
 static const cc_flag cc_flags[] = {
-    /*  opt         accepts_arg driver_flag driver_only fat_nocompat */
+    /*  opt         accepts_arg driver_flag driver_only fat_nocompat march_nocompat */
 
     // arguments the driver must be aware of
-    {   "-o",       true,       true,       true,       false   },
-    {   "-c",       false,      false,      false,      false   },
+    {   "-o",       true,       true,       true,       false,       false  },
+    {   "-c",       false,      false,      false,      false,       false  },
 
     // driver-specific arguments
-    {   "-arch",    true,       true,       true,       false   },
+    {   "-arch",    true,       true,       true,       false,       false  },
 
     // fat-incompatible arguments
-    {   "-S",       false,      false,      false,      true    },
-    {   "-E",       false,      false,      false,      true    },
-    {   "-MD",      false,      false,      false,      true    },
-    {   "-MMD",     false,      false,      false,      true    },
-    {   "-m32",     false,      false,      false,      true    },
-    {   "-m64",     false,      false,      false,      true    },
+    {   "-S",       false,      false,      false,      true,        false  },
+    {   "-E",       false,      false,      false,      true,        false  },
+    {   "-MD",      false,      false,      false,      true,        false  },
+    {   "-MMD",     false,      false,      false,      true,        false  },
+    {   "-m32",     false,      false,      false,      true,        true   },
+    {   "-m64",     false,      false,      false,      true,        true   },
+    {   "-march=",  false,      false,      false,      true,        true   },
+    {   "-mcpu=",   false,      false,      false,      true,        true   },
 
     // multi-argument options
-    {   "-D",       true,       false,      false,      false   },
-    {   "-U",       true,       false,      false,      false   },
-    {   "-e",       true,       false,      false,      false   },
-    {   "-T",       true,       false,      false,      false   },
-    {   "-u",       true,       false,      false,      false   },
-    {   "-I",       true,       false,      false,      false   },
-    {   "-m",       true,       false,      false,      false   },
-    {   "-x",       true,       false,      false,      false   },
-    {   "-L",       true,       false,      false,      false   },
-    {   "-A",       true,       false,      false,      false   },
-    {   "-V",       true,       false,      false,      false   },
+    {   "-D",       true,       false,      false,      false,       false  },
+    {   "-U",       true,       false,      false,      false,       false  },
+    {   "-e",       true,       false,      false,      false,       false  },
+    {   "-T",       true,       false,      false,      false,       false  },
+    {   "-u",       true,       false,      false,      false,       false  },
+    {   "-I",       true,       false,      false,      false,       false  },
+    {   "-m",       true,       false,      false,      false,       false  },
+    {   "-x",       true,       false,      false,      false,       false  },
+    {   "-L",       true,       false,      false,      false,       false  },
+    {   "-A",       true,       false,      false,      false,       false  },
+    {   "-V",       true,       false,      false,      false,       false  },
 
-    {   "-Tdata",   true,       false,      false,      false   },
-    {   "-Ttext",   true,       false,      false,      false   },
-    {   "-Tbss",    true,       false,      false,      false   },
-    {   "-include", true,       false,      false,      false   },
-    {   "-imacros", true,       false,      false,      false   },
+    {   "-Tdata",   true,       false,      false,      false,       false  },
+    {   "-Ttext",   true,       false,      false,      false,       false  },
+    {   "-Tbss",    true,       false,      false,      false,       false  },
+    {   "-include", true,       false,      false,      false,       false  },
+    {   "-imacros", true,       false,      false,      false,       false  },
     {   "-aux-info",
-                    true,       false,      false,      false   },
+                    true,       false,      false,      false,       false  },
     {   "-idirafter",
-                    true,       false,      false,      false   },
-    {   "-iprefix", true,       false,      false,      false   },
+                    true,       false,      false,      false,       false  },
+    {   "-iprefix", true,       false,      false,      false,       false  },
     {   "-iwithprefix",
-                    true,       false,      false,      false   },
+                    true,       false,      false,      false,       false  },
     {   "-iwithprefixbefore",
-                    true,       false,      false,      false   },
+                    true,       false,      false,      false,       false  },
     {   "-iwithprefix",
-                    true,       false,      false,      false   },
-    {   "-iquote",  true,       false,      false,      false   },
-    {   "-isystem", true,       false,      false,      false   },
-    {   "-isysroot",true,       false,      false,      false   },
+                    true,       false,      false,      false,       false  },
+    {   "-iquote",  true,       false,      false,      false,       false  },
+    {   "-isystem", true,       false,      false,      false,       false  },
+    {   "-isysroot",true,       false,      false,      false,       false  },
 
 };
 
@@ -166,7 +169,7 @@ static const arch_cc_march_entry arch_cc_march_map[] = {
 };
 
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
-        arg_table *nofat_args, compiler_set *compilers, int depth);
+    arg_table *nofat_args, compiler_set *compilers, int depth);
 
 /* Look up the given option in the cc_flags table. */
 static const cc_flag *find_flag (const char *opt)
@@ -175,8 +178,16 @@ static const cc_flag *find_flag (const char *opt)
 
     for (i = 0; i < sizeof(cc_flags) / sizeof(cc_flags[0]); i++) {
         const cc_flag *flag = &cc_flags[i];
-        if (strcmp(opt, flag->opt) == 0)
+
+        /* Special case for -flag= arguments that combine the flag and value. */
+        size_t optlen = strlen(flag->opt);
+        if (optlen > 0 && flag->opt[optlen-1] == '=') {
+            if (strncmp(opt, flag->opt, optlen))
+                return flag;
+
+        } else if (strcmp(opt, flag->opt) == 0) {
             return flag;
+        }
     }
 
     return NULL;
@@ -236,17 +247,6 @@ static compiler *append_compiler (compiler_set *compilers, const char *arch) {
     // Copy in all previously parsed arguments
     for (i = 0; i < compilers->default_args.argc; i++)
         append_argument(&c->args, compilers->default_args.argv[i]);
-
-    // Add any -march flag
-    for (i = 0; i < sizeof(arch_cc_march_map) / sizeof(arch_cc_march_map[0]); i++) {
-        const arch_cc_march_entry *entry = &arch_cc_march_map[i];
-        if (strcmp(arch, entry->arch_flag) == 0) {
-            int j;
-            for (j = 0; entry->cc_flag[j] != NULL; j++)
-                append_argument(&c->args, entry->cc_flag[j]);
-            break;
-        }
-    }
 
     // Append to the compiler set
     compilers->count++;
@@ -341,7 +341,7 @@ static void parse_argument_file (const char *fname, arg_table *driver_args,
 
 /* Parse all arguments from input_args, populating compilers and fat_args. */
 static void parse_arguments (arg_table *input_args, arg_table *driver_args,
-        arg_table *nofat_args, compiler_set *compilers, int depth)
+    arg_table *nofat_args, compiler_set *compilers, int depth)
 {
     int i;
 
@@ -494,6 +494,7 @@ int main(int argc, const char **argv)
     arg_table temp_output_args;
     char *fatelf_glue_path;
     bool all_compiles_succeeded;
+    bool march_nocompat;
     int stat_loc;
 
     compiler_set compilers;
@@ -573,6 +574,46 @@ int main(int argc, const char **argv)
     if (compilers.count == 0) {
         const fatelf_machine_info *machine = get_machine_from_host();
         append_compiler(&compilers, machine->name);
+    }
+
+    /* Now that all arguments are resolved, apply any necessary march flags
+     * flags. */
+    for (i = 0; i < compilers.count; i++) {
+        compiler *c = compilers.compilers[i];
+
+        /* Search for any arguments that are incompatible with us setting
+         * our own -m* flags */
+        int argi;
+        bool march_allowed = true;
+        for (argi = 0; argi < c->args.argc; argi++) {
+            const char *arg = c->args.argv[i];
+            const cc_flag *flag = find_flag(arg);
+
+            if (flag->accepts_arg)
+                argi++;
+
+            if (strcmp(arg, flag->opt) != 0)
+                continue;
+
+            if (flag->march_nocompat) {
+                march_allowed = false;
+                break;
+            }
+        }
+
+        if (!march_allowed)
+            continue;
+
+        /* If permitted, add our march flags */
+        for (i = 0; i < sizeof(arch_cc_march_map) / sizeof(arch_cc_march_map[0]); i++) {
+            const arch_cc_march_entry *entry = &arch_cc_march_map[i];
+            if (strcmp(c->fat_arch, entry->arch_flag) == 0) {
+                int j;
+                for (j = 0; entry->cc_flag[j] != NULL; j++)
+                    append_argument(&c->args, entry->cc_flag[j]);
+                break;
+            }
+        }
     }
 
     /* Generate the output file template */
