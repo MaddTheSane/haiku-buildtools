@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 static const char xarch_flag[] = "-Xarch_";
 static const char default_output[] = "a.out";
